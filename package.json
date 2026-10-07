@@ -1,0 +1,29 @@
+{
+  "name": "dogfood-wallet",
+  "version": "0.1.0",
+  "description": "Local BSV agent vault. The LLM requests payment; a signer on your machine authorizes it.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "dogfood-wallet": "src/cli.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "wallet": "bun src/cli.ts",
+    "mcp": "bun src/mcp.ts"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "keywords": [
+    "bsv",
+    "bitcoin",
+    "agent",
+    "mcp",
+    "wallet"
+  ],
+  "dependencies": {
+    "@bsv/sdk": "^3.1.0",
+    "@modelcontextprotocol/sdk": "^1.32.1"
+  }
+}

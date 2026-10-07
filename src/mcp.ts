@@ -1,0 +1,87 @@
+#!/usr/bin/env bun
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { defaultFetchUtxos, sendPayment } from "./send";
+import { defaultVaultDir, killVault, loadVault, statusVault } from "./vault";
+
+function text(obj: unknown, isError = false) {
+  return {
+    content: [{ type: "text" as const, text: typeof obj === "string" ? obj : JSON.stringify(obj, null, 2) }],
+    isError,
+  };
+}
+
+export function createServer(root: string) {
+  const server = new McpServer({ name: "dogfood-wallet", version: "0.1.0" });
+
+  server.registerTool(
+    "address",
+    { description: "Receive address for this Dogfood Wallet vault. Fund this. Never a private key." },
+    async () => text({ address: loadVault(root).address }),
+  );
+
+  server.registerTool(
+    "status",
+    { description: "Vault status: address, sat cap, killfile, whether a key is present. No secrets." },
+    async () => text(statusVault(root)),
+  );
+
+  server.registerTool(
+    "balance",
+    { description: "On-chain satoshi balance and current spend policy." },
+    async () => {
+      const v = loadVault(root);
+      const utxos = await defaultFetchUtxos(v.address);
+      const sats = utxos.reduce((s, u) => s + u.value, 0);
+      return text({
+        address: v.address,
+        balanceSats: sats,
+        utxos: utxos.length,
+        capSatsPerTx: v.policy.maxSatsPerTx,
+        killfile: v.policy.killfileOn,
+      });
+    },
+  );
+
+  server.registerTool(
+    "send",
+    {
+      description:
+        "Pay satoshis to a mainnet P2PKH address. Rejected if over the sat cap, killfile is on, or funds are insufficient. Amount is satoshis, not USD.",
+      inputSchema: {
+        to: z.string().describe("Mainnet P2PKH address"),
+        amount: z.number().int().positive().describe("Satoshis to send"),
+        note: z.string().optional().describe("Local log note only"),
+      },
+    },
+    async ({ to, amount, note }) => {
+      const result = await sendPayment({ root, to, amount, note });
+      return text(result, !result.ok);
+    },
+  );
+
+  server.registerTool(
+    "kill",
+    { description: "Freeze spending. A human must delete STOP_SPENDING in the vault dir to resume. Agents must not delete it." },
+    async () => {
+      killVault(root);
+      return text({ killed: true, message: "STOP_SPENDING set." });
+    },
+  );
+
+  return server;
+}
+
+export async function runMcp(root = defaultVaultDir()) {
+  const server = createServer(root);
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+if (import.meta.main) {
+  runMcp().catch((e) => {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  });
+}

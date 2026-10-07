@@ -1,0 +1,10 @@
+node_modules/
+*.enc
+wrap.key
+STOP_SPENDING
+spends.jsonl
+address.txt
+policy.json
+.vault/
+.env
+*.log
