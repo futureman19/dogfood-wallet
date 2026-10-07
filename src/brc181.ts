@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PublicKey, Signature } from "@bsv/sdk";
+import { P2PKH, PublicKey, Signature } from "@bsv/sdk";
 
 export const POLICY_TYPE = "brc-181/agent-policy/1";
 
@@ -135,4 +135,41 @@ export function evaluatePolicyRequest(
     return { verdict: "REJECT", reason: "over total budget" };
   }
   return { verdict: "ALLOW_AUTO" };
+}
+
+export type PolicyEnvelope = {
+  payload: Record<string, unknown>;
+  sig: { alg: string; issuer: string; signature: string };
+};
+
+export function gateAgentSend(opts: {
+  envelope: PolicyEnvelope | null | undefined;
+  to: string;
+  amount: number;
+  fee: number;
+  spentTotal: number;
+  origin?: string;
+}): { ok: true } | { ok: false; code: string; message: string } {
+  if (!opts.envelope) return { ok: true };
+  const verified = verifyPolicyEnvelope(opts.envelope);
+  if (!verified.ok) return verified;
+  let lockingScriptHex: string;
+  try {
+    lockingScriptHex = new P2PKH().lock(opts.to).toHex();
+  } catch {
+    return { ok: false, code: "BAD_ADDRESS", message: "REJECTED: Destination is not a P2PKH address." };
+  }
+  const origin =
+    opts.origin ?? process.env.DOGFOOD_ORIGIN_TOKEN ?? String(opts.envelope.payload.origin_token ?? "");
+  const verdict = evaluatePolicyRequest(opts.envelope.payload, {
+    origin,
+    payout: opts.amount,
+    lockingScriptHex,
+    fee: opts.fee,
+    spentTotal: opts.spentTotal,
+  });
+  if (verdict.verdict !== "ALLOW_AUTO") {
+    return { ok: false, code: "POLICY", message: `REJECTED: BRC-181 ${verdict.reason ?? "denied"}.` };
+  }
+  return { ok: true };
 }

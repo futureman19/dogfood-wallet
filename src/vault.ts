@@ -23,6 +23,7 @@ export function vaultPaths(root: string) {
     policy: join(root, "policy.json"),
     kill: join(root, "STOP_SPENDING"),
     log: join(root, "spends.jsonl"),
+    brc181: join(root, "brc181.json"),
   };
 }
 

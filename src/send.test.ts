@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initVault, killVault, allowDestination } from "./vault";
@@ -111,6 +111,77 @@ describe("sendPayment policy gate", () => {
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.code).toBe("ALLOWLIST");
+      expect(fetched).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+const VECTOR_DEST = "12ZEw5Hcv1hTb6YUQJ69y1V7uhcoDz92PH";
+
+function writeVectorAEnvelope(root: string) {
+  const vectors = JSON.parse(readFileSync(join(import.meta.dir, "..", "testdata", "brc-181-vectors.json"), "utf8"));
+  writeFileSync(
+    join(root, "brc181.json"),
+    JSON.stringify({
+      payload: JSON.parse(vectors.vectorA.canonical),
+      sig: {
+        alg: "ECDSA-SHA256-secp256k1",
+        issuer: vectors.vectorA.issuer,
+        signature: vectors.vectorA.signature,
+      },
+    }),
+  );
+}
+
+describe("sendPayment BRC-181 envelope", () => {
+  test("does not fetch when envelope per-tx cap would fail", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      allowDestination(root, VECTOR_DEST);
+      writeVectorAEnvelope(root);
+      let fetched = false;
+      const result = await sendPayment({
+        root,
+        to: VECTOR_DEST,
+        amount: 101,
+        origin: "agt-marketplace-bidder-01",
+        fetchUtxos: async () => {
+          fetched = true;
+          return [];
+        },
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("POLICY");
+      expect(fetched).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("does not fetch when dest is off the signed allowlist", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      allowDestination(root, TO);
+      writeVectorAEnvelope(root);
+      let fetched = false;
+      const result = await sendPayment({
+        root,
+        to: TO,
+        amount: 50,
+        origin: "agt-marketplace-bidder-01",
+        fetchUtxos: async () => {
+          fetched = true;
+          return [];
+        },
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("POLICY");
       expect(fetched).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });

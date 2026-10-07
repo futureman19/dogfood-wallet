@@ -8,6 +8,7 @@ import {
   payloadDigest,
   verifyPolicyEnvelope,
   evaluatePolicyRequest,
+  gateAgentSend,
 } from "./brc181";
 
 const vectors = JSON.parse(
@@ -135,3 +136,91 @@ describe("BRC-181 Vector D enforce (payout path, fee 0)", () => {
     expect(r.verdict).toBe("REJECT");
   });
 });
+
+const VECTOR_DEST = "12ZEw5Hcv1hTb6YUQJ69y1V7uhcoDz92PH";
+const OTHER_DEST = "1GjcRUKdwqsnrxCHiDoHtF57rKqDd8oibT";
+
+function vectorAEnvelope() {
+  return {
+    payload: JSON.parse(vectors.vectorA.canonical) as Record<string, unknown>,
+    sig: {
+      alg: "ECDSA-SHA256-secp256k1",
+      issuer: vectors.vectorA.issuer,
+      signature: vectors.vectorA.signature,
+    },
+  };
+}
+
+describe("gateAgentSend", () => {
+  test("no envelope is a no-op", () => {
+    const r = gateAgentSend({ envelope: null, to: OTHER_DEST, amount: 50_000, fee: 0, spentTotal: 0 });
+    expect(r.ok).toBe(true);
+  });
+
+  test("Vector A allows 100 to the listed P2PKH", () => {
+    const r = gateAgentSend({
+      envelope: vectorAEnvelope(),
+      to: VECTOR_DEST,
+      amount: 100,
+      fee: 0,
+      spentTotal: 0,
+      origin: "agt-marketplace-bidder-01",
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  test("Vector A rejects 101 (per-tx)", () => {
+    const r = gateAgentSend({
+      envelope: vectorAEnvelope(),
+      to: VECTOR_DEST,
+      amount: 101,
+      fee: 0,
+      spentTotal: 0,
+      origin: "agt-marketplace-bidder-01",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("POLICY");
+  });
+
+  test("Vector A rejects an off-allowlist P2PKH", () => {
+    const r = gateAgentSend({
+      envelope: vectorAEnvelope(),
+      to: OTHER_DEST,
+      amount: 50,
+      fee: 0,
+      spentTotal: 0,
+      origin: "agt-marketplace-bidder-01",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("POLICY");
+  });
+
+  test("tampered envelope is BAD_SIG", () => {
+    const env = vectorAEnvelope();
+    env.payload.per_tx_cap = 101;
+    const r = gateAgentSend({
+      envelope: env,
+      to: VECTOR_DEST,
+      amount: 50,
+      fee: 0,
+      spentTotal: 0,
+      origin: "agt-marketplace-bidder-01",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("BAD_SIG");
+  });
+
+  test("typical P2PKH fee over max_fee is REJECT", () => {
+    const r = gateAgentSend({
+      envelope: vectorAEnvelope(),
+      to: VECTOR_DEST,
+      amount: 100,
+      fee: 226,
+      spentTotal: 0,
+      origin: "agt-marketplace-bidder-01",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("POLICY");
+  });
+});
+
