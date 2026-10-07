@@ -32,9 +32,10 @@ bun src/cli.ts status
 bun src/cli.ts allow <p2pkh-address>
 bun src/cli.ts send <p2pkh-address> <sats> [note]
 bun src/cli.ts kill
+bun src/cli.ts sweep <p2pkh-address>
 ```
 
-`allow` is **human-only** — it is not an MCP tool. `kill` writes `STOP_SPENDING`. A **human** deletes that file to resume. Agents must not.
+`allow` and `sweep` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. `kill` writes `STOP_SPENDING`. A **human** deletes that file to resume agent sends. Agents must not.
 
 ## MCP
 

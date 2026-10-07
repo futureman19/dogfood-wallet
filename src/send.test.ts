@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initVault, killVault, allowDestination } from "./vault";
-import { sendPayment } from "./send";
+import { sendPayment, sweepPayment } from "./send";
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "dogfood-send-"));
@@ -103,3 +103,51 @@ describe("sendPayment policy gate", () => {
     }
   });
 });
+
+describe("sweepPayment", () => {
+  test("fetches UTXOs even when killfile is on and allowlist is empty", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      killVault(root);
+      let fetched = false;
+      const result = await sweepPayment({
+        root,
+        to: TO,
+        fetchUtxos: async () => {
+          fetched = true;
+          return [];
+        },
+      });
+      expect(fetched).toBe(true);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("INSUFFICIENT");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a bad sweep destination without fetching", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      let fetched = false;
+      const result = await sweepPayment({
+        root,
+        to: "bad",
+        fetchUtxos: async () => {
+          fetched = true;
+          return [];
+        },
+      });
+      expect(fetched).toBe(false);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("BAD_ADDRESS");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+

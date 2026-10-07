@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { evaluateSend, usageFromLog, DEFAULT_MAX_SATS, type Policy } from "./policy";
+import { evaluateSend, usageFromLog, evaluateSweep, DEFAULT_MAX_SATS, type Policy } from "./policy";
 
 const TO = "1GjcRUKdwqsnrxCHiDoHtF57rKqDd8oibT";
 const OTHER = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
@@ -134,6 +134,20 @@ describe("usageFromLog", () => {
     const usage = usageFromLog(['{"t":"2026-10-07T00:00:00.000Z"}'], new Date("2026-10-07T12:00:00.000Z"));
     expect(usage.spentToday).toBe(0);
     expect(usage.spentLifetime).toBe(0);
+  });
+});
+
+describe("evaluateSweep", () => {
+  test("allows a P2PKH destination even with killfile, empty allowlist, and tiny per-tx cap", () => {
+    const d = evaluateSweep(base({ killfileOn: true, allowlist: [], maxSatsPerTx: 1 }), TO);
+    expect(d.ok).toBe(true);
+  });
+
+  test("rejects a bad address", () => {
+    const d = evaluateSweep(base(), "not-an-address");
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("BAD_ADDRESS");
   });
 });
 

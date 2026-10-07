@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { P2PKH, Transaction } from "@bsv/sdk";
-import { evaluateSend } from "./policy";
+import { evaluateSend, evaluateSweep } from "./policy";
 import { loadUsage, loadVault, vaultPaths } from "./vault";
 
 export type Utxo = { tx_hash: string; tx_pos: number; value: number };
@@ -111,4 +111,59 @@ export async function sendPayment(opts: {
     })}\n`,
   );
   return { ok: true, txid, amount: opts.amount, to: opts.to, fee };
+}
+
+export async function sweepPayment(opts: {
+  root: string;
+  to: string;
+  note?: string;
+  fetchUtxos?: (address: string) => Promise<Utxo[]>;
+  fetchTxHex?: (txid: string) => Promise<string>;
+  broadcast?: (raw: string) => Promise<{ txid: string }>;
+}): Promise<SendResult> {
+  const vault = loadVault(opts.root);
+  const decision = evaluateSweep(vault.policy, opts.to);
+  if (!decision.ok) return decision;
+
+  const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
+  const total = utxos.reduce((s, u) => s + u.value, 0);
+  const fee = feeFor(Math.max(utxos.length, 1), 1);
+  if (utxos.length === 0 || total <= fee) {
+    return {
+      ok: false,
+      code: "INSUFFICIENT",
+      message: `REJECTED: Insufficient funds to sweep (${total} sats, fee ${fee}).`,
+    };
+  }
+  const amount = total - fee;
+  const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
+  const tx = new Transaction();
+  for (const u of utxos) {
+    const hex = await fetchTxHex(u.tx_hash);
+    const source = Transaction.fromHex(hex);
+    tx.addInput({
+      sourceTransaction: source,
+      sourceTXID: u.tx_hash,
+      sourceOutputIndex: u.tx_pos,
+      unlockingScriptTemplate: new P2PKH().unlock(vault.key),
+    });
+  }
+  tx.addOutput({ satoshis: amount, lockingScript: new P2PKH().lock(opts.to) });
+  await tx.sign();
+  const raw = tx.toHex();
+  const { txid } = await (opts.broadcast ?? defaultBroadcast)(raw);
+  const paths = vaultPaths(opts.root);
+  appendFileSync(
+    paths.log,
+    `${JSON.stringify({
+      t: new Date().toISOString(),
+      txid,
+      to: opts.to,
+      amount,
+      fee,
+      note: opts.note ?? "sweep",
+      kind: "sweep",
+    })}\n`,
+  );
+  return { ok: true, txid, amount, to: opts.to, fee };
 }

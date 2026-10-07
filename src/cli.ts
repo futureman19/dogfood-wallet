@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { defaultFetchUtxos } from "./send";
-import { sendPayment } from "./send";
+import { sendPayment, sweepPayment } from "./send";
 import { decideX402, decodeChallengeHeader } from "./x402";
 import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault } from "./vault";
 
@@ -18,11 +18,12 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [note]
   bun src/cli.ts kill
+  bun src/cli.ts sweep <p2pkh-address>
   bun src/cli.ts x402-inspect <X402-Challenge-header>
   bun src/cli.ts mcp
 
 The LLM never sees the key. Policy lives in the signer.
-allow is human-only (not an MCP tool).
+allow and sweep are human-only (not MCP tools).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
 
@@ -93,6 +94,14 @@ async function main() {
       if (!result.ok) die(result.message);
       console.log(`txid: ${result.txid}`);
       console.log(`sent: ${result.amount} sats to ${result.to} (fee ${result.fee})`);
+      break;
+    }
+    case "sweep": {
+      if (!a) die("Usage: sweep <p2pkh-address>");
+      const result = await sweepPayment({ root, to: a, note: "sweep" });
+      if (!result.ok) die(result.message);
+      console.log(`txid: ${result.txid}`);
+      console.log(`swept: ${result.amount} sats to ${result.to} (fee ${result.fee})`);
       break;
     }
     case "x402-inspect": {

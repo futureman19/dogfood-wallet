@@ -27,6 +27,17 @@ export function isValidAddress(address: string): boolean {
   return P2PKH.test(address);
 }
 
+export function evaluateSweep(_policy: Policy, to: string): Decision {
+  if (!isValidAddress(to)) {
+    return {
+      ok: false,
+      code: "BAD_ADDRESS",
+      message: "REJECTED: Destination is not a mainnet P2PKH address.",
+    };
+  }
+  return { ok: true };
+}
+
 export function utcDay(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
