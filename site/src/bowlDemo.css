@@ -1,0 +1,270 @@
+.interactive-vault .vault-body {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+.dial-wrap {
+  min-width: 0;
+  text-align: center;
+}
+.bowl-display.bowl-dial {
+  width: 100%;
+  max-width: 180px;
+  aspect-ratio: 1;
+  min-height: 0;
+  margin: auto;
+  cursor: ew-resize;
+  touch-action: pan-y;
+  user-select: none;
+  border-radius: 50%;
+}
+.bowl-dial:focus-visible {
+  outline: 2px solid #a0ffc8;
+  outline-offset: 3px;
+}
+.bowl-dial .dial-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.dial-track,
+.dial-fill {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+.dial-track {
+  stroke: #294b35;
+}
+.dial-fill {
+  stroke: #79f4a5;
+}
+.dial-handle {
+  fill: #c5ffdb;
+  stroke: #173a24;
+  stroke-width: 2;
+}
+.dial-handle-halo {
+  fill: #79f4a528;
+}
+.bowl-dial:hover .dial-handle-halo,
+.bowl-dial.is-dragging .dial-handle-halo {
+  fill: #79f4a560;
+}
+.bowl-display.bowl-dial img {
+  width: 67%;
+  height: auto;
+  pointer-events: none;
+  filter: drop-shadow(0 0 12px #46ff6828);
+}
+.bowl-display.bowl-dial .dial-caption {
+  font-size: 7px;
+  margin-top: 10px;
+  pointer-events: none;
+}
+#dial-help {
+  font:
+    10px/1.6 ui-monospace,
+    monospace;
+  color: #b2d9bf;
+  margin: 4px 0 0;
+}
+#dial-help span {
+  color: #8da795;
+  font-size: 9px;
+}
+.interactive-vault button {
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.interactive-vault button:focus-visible,
+.demo-allow input:focus-visible {
+  outline: 2px solid #a0ffc8;
+  outline-offset: 3px;
+}
+.demo-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 44px;
+  padding: 5px 2px 5px 8px;
+  font-size: 11px;
+  color: #b2cbb9;
+}
+.demo-reset:hover {
+  color: #fff;
+}
+.budget-presets {
+  display: flex;
+  gap: 5px;
+  margin-top: 12px;
+}
+.budget-presets button {
+  flex: 1;
+  min-height: 32px;
+  border: 1px solid #466950;
+  border-radius: 5px;
+  font:
+    11px ui-monospace,
+    monospace;
+  color: #bbd5c3;
+  background: #0b1c12;
+}
+.budget-presets button[aria-pressed="true"],
+.budget-presets button:hover {
+  color: #caffdc;
+  border-color: #81d49d;
+  background: #24452f;
+}
+.interactive-vault .cap-value {
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(24px, 2.3vw, 32px);
+}
+.demo-usage {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 5px;
+  font:
+    9px/1.5 ui-monospace,
+    monospace;
+  color: #a5c4af;
+}
+.usage-track {
+  height: 4px;
+  border-radius: 4px;
+  background: #294331;
+  overflow: hidden;
+  margin: 8px 0 15px;
+}
+.usage-track > div {
+  height: 100%;
+  background: #7cee9f;
+  transition: width 0.2s;
+}
+.demo-allow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  font-size: 10px;
+  color: #c7dbce;
+  cursor: pointer;
+  padding-block: 10px;
+}
+.demo-allow input {
+  width: 16px;
+  height: 16px;
+  accent-color: #79f4a5;
+  cursor: pointer;
+}
+.demo-allow > span {
+  color: #90ab99;
+  font-size: 9px;
+}
+.demo-actions {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 16px;
+}
+.demo-actions button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid #426a50;
+  background: #182f20;
+  border-radius: 5px;
+  padding: 9px;
+  font-size: 10px;
+  color: #c1f5d2;
+}
+.demo-actions button:first-child {
+  flex: 1;
+  background: #73e99e;
+  border-color: #73e99e;
+  color: #092312;
+  font-weight: 650;
+}
+.demo-actions button:hover {
+  border-color: #b1ffca;
+}
+.interactive-vault .owner-row {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.demo-result {
+  margin-top: 15px;
+  padding: 12px;
+  border-left: 2px solid #d9b37b;
+  background: #d9b37b08;
+  color: #ebc799;
+  min-height: 82px;
+}
+.demo-result strong {
+  display: block;
+  font-size: 9px;
+  font-weight: 500;
+}
+.demo-result span {
+  display: block;
+  font-size: 10px;
+  line-height: 1.7;
+  margin-top: 5px;
+}
+.demo-result.is-allowed {
+  color: #9becb6;
+  border-color: #79f4a5;
+  background: #79f4a508;
+}
+@media (max-width: 600px) {
+  .interactive-vault .vault-body {
+    gap: 10px;
+  }
+  .interactive-vault .vault-heading {
+    font-size: 9px;
+  }
+  .interactive-vault .cap-value {
+    font-size: 26px;
+  }
+  .interactive-vault .cap-label {
+    font-size: 8px;
+  }
+  .interactive-vault .cap-note {
+    line-height: 1.5;
+  }
+  .demo-reset {
+    font-size: 11px;
+  }
+  .budget-presets button {
+    min-height: 36px;
+    font-size: 10px;
+  }
+  .interactive-vault .policy-row {
+    flex-wrap: wrap;
+  }
+  .demo-actions {
+    flex-wrap: wrap;
+  }
+  .demo-actions button {
+    min-height: 44px;
+    font-size: 10px;
+  }
+  .demo-result strong {
+    font-size: 10px;
+  }
+  .preview-bottom {
+    line-height: 1.6;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .usage-track > div,
+  .interactive-vault button {
+    transition: none;
+  }
+}

@@ -1,142 +1,16 @@
 import {
   ArrowDown,
   ArrowUpRight,
-  Bot,
   Check,
   ChevronRight,
   Github,
-  LockKeyhole,
-  Power,
   ShieldCheck,
-  Terminal,
-  Wallet,
 } from "lucide-react";
+import VaultPreview from "./VaultPreview";
+import "./bowlDemo.css";
 
 const REPO = "https://github.com/futureman19/dogfood-wallet";
 const README = `${REPO}#readme`;
-const flow = [
-  { title: "User Wallet", sub: "Funding", Icon: Wallet },
-  { title: "Local Vault", sub: "Signer Daemon", Icon: LockKeyhole },
-  { title: "Digital Bowl", sub: "MCP Server Wallet", Icon: ShieldCheck },
-  { title: "AI Agents", sub: "MCP clients", Icon: Bot },
-];
-
-function Bowl() {
-  return (
-    <div className="bowl-display" aria-hidden="true">
-      <div className="bowl-orbit" />
-      <img src="/cyber-bowl.png" alt="" />
-      <span>YOUR KEYS STAY HERE</span>
-    </div>
-  );
-}
-
-function VaultPreview() {
-  return (
-    <section
-      className="preview"
-      aria-label="Illustrated local vault architecture — not a live wallet"
-    >
-      <div className="preview-caption">
-        <span className="status-dot" /> ON YOUR MACHINE{" "}
-        <span>ILLUSTRATION / NOT LIVE</span>
-      </div>
-      <div className="flow-panel">
-        <div className="panel-eyebrow">A SMALL BUDGET. A CLEAR BOUNDARY.</div>
-        <ol className="flow">
-          {flow.map(({ title, sub, Icon }, i) => (
-            <li key={title}>
-              <div className="flow-icon">
-                <Icon size={19} strokeWidth={1.5} />
-              </div>
-              <strong>{title}</strong>
-              <span>{sub}</span>
-              {i < flow.length - 1 && (
-                <ChevronRight
-                  className="flow-arrow"
-                  size={15}
-                  aria-hidden="true"
-                />
-              )}
-            </li>
-          ))}
-        </ol>
-      </div>
-      <div className="vault-panel">
-        <div className="vault-heading">
-          <span>
-            <LockKeyhole size={14} /> LOCAL AGENT BOWL VAULT
-          </span>
-          <span className="local-badge">LOCAL ONLY</span>
-        </div>
-        <div className="vault-body">
-          <Bowl />
-          <div className="vault-controls">
-            <div className="cap-label">DEFAULT DAILY CAP</div>
-            <div className="cap-value">
-              50,000 <span>sats</span>
-            </div>
-            <div className="cap-note">10,000 sats per transaction</div>
-            <a
-              className="kill-switch"
-              href={README}
-              aria-label="Kill switch — read the documentation"
-            >
-              <Power size={15} /> KILL SWITCH <ArrowUpRight size={14} />
-            </a>
-            <span className="docs-note">Docs only. No vault connected.</span>
-          </div>
-        </div>
-        <div className="policy-row">
-          <span>
-            <ShieldCheck size={14} /> Empty allowlist
-          </span>
-          <strong>DENY ALL SENDS</strong>
-        </div>
-        <div className="owner-row">
-          <span>allow / sweep / split</span>
-          <span>HUMAN-ONLY</span>
-        </div>
-      </div>
-      <div className="terminal-panel">
-        <div className="terminal-bar">
-          <span className="window-dots" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-          <span>
-            <Terminal size={13} /> local / setup notes
-          </span>
-          <span>EXAMPLE</span>
-        </div>
-        <div className="terminal-content">
-          <p>
-            <span className="prompt">$</span> bun src/cli.ts mcp-http
-          </p>
-          <p className="terminal-comment"># Default MCP HTTP endpoint</p>
-          <p className="terminal-green">http://127.0.0.1:38402/mcp</p>
-          <div className="terminal-divider" />
-          <p>
-            <span className="terminal-muted">policy</span>{" "}
-            <span>10,000 sats/tx · 50,000 sats/day</span>
-          </p>
-          <p>
-            <span className="terminal-muted">allowlist</span>{" "}
-            <span className="terminal-amber">empty → sends denied</span>
-          </p>
-          <p>
-            <span className="terminal-muted">keys</span>{" "}
-            <span>local signer only. Never the model.</span>
-          </p>
-        </div>
-      </div>
-      <div className="preview-bottom">
-        <LockKeyhole size={12} /> Local signer. Local MCP. No hosted custody.
-      </div>
-    </section>
-  );
-}
 
 export default function App() {
   return (
