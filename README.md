@@ -59,6 +59,14 @@ Claude Desktop / Cursor example:
 
 Hermes: same command, or `bun src/mcp.ts`.
 
+HTTP (loopback, stateless POST `/mcp`):
+
+```bash
+bun src/cli.ts mcp-http
+```
+
+Default `http://127.0.0.1:38402/mcp`. Override `DOGFOOD_MCP_HOST` / `DOGFOOD_MCP_PORT`. Binding anything other than loopback **requires** `DOGFOOD_MCP_TOKEN` (Bearer). Health: `GET /health`. Same tools as stdio — no `allow`, no `sweep`. Do not put this on Fly without the token; the signer is on this machine.
+
 ## Policy
 
 | Gate | Result |

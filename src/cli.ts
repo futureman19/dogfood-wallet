@@ -21,6 +21,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts sweep <p2pkh-address>
   bun src/cli.ts x402-inspect <X402-Challenge-header>
   bun src/cli.ts mcp
+  bun src/cli.ts mcp-http
 
 The LLM never sees the key. Policy lives in the signer.
 allow and sweep are human-only (not MCP tools).
@@ -116,6 +117,11 @@ async function main() {
     case "mcp": {
       const { runMcp } = await import("./mcp");
       await runMcp(root);
+      break;
+    }
+    case "mcp-http": {
+      const { runHttp } = await import("./http");
+      await runHttp(root);
       break;
     }
     default:

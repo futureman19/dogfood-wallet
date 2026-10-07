@@ -17,7 +17,7 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 - Repo: `C:/Users/futur/Desktop/dogfood-wallet`
 - GitHub: https://github.com/futureman19/dogfood-wallet (public, MIT)
 - Vault dir: `~/.dogfood-wallet` (`DOGFOOD_WALLET_DIR` override)
-- CLI: `bun src/cli.ts` (`init` / `address` / `balance` / `status` / `allow` / `send` / `kill` / `sweep` / `x402-inspect` / `mcp`)
+- CLI: `bun src/cli.ts` (`init` / `address` / `balance` / `status` / `allow` / `send` / `kill` / `sweep` / `x402-inspect` / `mcp` / `mcp-http`)
 - Tests: `bun test` from the repo root before commit. Push `main` after green.
 - x402 vectors: `testdata/x402-vectors-v1.json` (Merkle Works v1 frozen). Codec lives in `src/x402.ts`.
 
@@ -44,8 +44,7 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 ## Next slices (user picks)
 
 1. x402 **settlement** via a live Merkle Works delegator (inspect + vector codec shipped; nonce UTXO is theirs)
-2. HTTP MCP (stdio is shipped)
-3. UTXO pocket-change for concurrent 402s
+2. UTXO pocket-change for concurrent 402s
 
 ## Pitfalls
 
