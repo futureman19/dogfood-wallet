@@ -25,7 +25,7 @@ function Bowl() {
   return (
     <div className="bowl-display" aria-hidden="true">
       <div className="bowl-orbit" />
-      <img src="/bowl-mark.png" alt="" />
+      <img src="/cyber-bowl.png" alt="" />
       <span>YOUR KEYS STAY HERE</span>
     </div>
   );
@@ -146,10 +146,8 @@ export default function App() {
       </a>
       <header className="site-header page-width">
         <a className="brand" href="/" aria-label="Dogfood Wallet home">
-          <img src="/bowl-mark.png" alt="" />
-          <span>
-            DOGFOOD<span>WALLET</span>
-          </span>
+          <img src="/cyber-bowl.png" alt="" />
+          <img className="brand-wordmark" src="/brand-wordmark.png" alt="" />
         </a>
         <nav aria-label="Main navigation">
           <a href={README}>Docs</a>
@@ -168,8 +166,13 @@ export default function App() {
             <span className="status-dot" /> OPEN SOURCE / LOCAL BSV VAULT
           </div>
           <h1>
-            <span>DOGFOOD</span>
-            <br />
+            <img
+              className="hero-wordmark"
+              src="/dogfood-wordmark.png"
+              alt="DOGFOOD"
+              width="571"
+              height="84"
+            />
             WALLET
           </h1>
           <h2>

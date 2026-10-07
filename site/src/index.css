@@ -79,18 +79,23 @@ svg {
   object-fit: contain;
   mix-blend-mode: screen;
 }
-.brand > span {
-  font-size: 13px;
-  font-weight: 850;
-  letter-spacing: 0.07em;
-  line-height: 1.12;
+.brand .brand-wordmark {
+  width: 100px;
+  height: auto;
 }
-.brand > span > span {
+.hero-wordmark {
   display: block;
-  font-size: 10px;
-  letter-spacing: 0.3em;
-  margin-top: 4px;
-  color: #76c997;
+  width: min(100%, 500px);
+  height: auto;
+  margin-bottom: 14px;
+}
+@media (max-width: 600px) {
+  .brand .brand-wordmark {
+    width: 85px;
+  }
+  .hero-wordmark {
+    margin-bottom: 10px;
+  }
 }
 .site-header nav {
   display: flex;
