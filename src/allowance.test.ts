@@ -3,10 +3,11 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { LockingScript, P2PKH, PrivateKey, Transaction } from "@bsv/sdk";
+import { KeyDeriver, LockingScript, P2PKH, PrivateKey, Transaction } from "@bsv/sdk";
 import {
   AGENT_ALLOWANCE_PROTOCOL_ID,
   certificateType,
+  deriveAllowanceKeys,
   fundAllowance,
   generateAllowanceId,
   inspectDescriptor,
@@ -37,6 +38,25 @@ describe("BRC-0204 constants", () => {
     const b = generateAllowanceId();
     expect(Buffer.from(a, "base64").length).toBeGreaterThanOrEqual(16);
     expect(a).not.toBe(b);
+  });
+});
+
+describe("BRC-0204 Type42 keys", () => {
+  test("owner and agent allowance pubs are derived, not identity keys", () => {
+    const owner = PrivateKey.fromRandom();
+    const agent = PrivateKey.fromRandom();
+    const id = generateAllowanceId();
+    const keys = deriveAllowanceKeys(owner, agent.toPublicKey().toString(), id);
+    expect(keys.ownerPubHex).not.toBe(owner.toPublicKey().toString().toLowerCase());
+    expect(keys.agentPubHex).not.toBe(agent.toPublicKey().toString().toLowerCase());
+    expect(keys.ownerPriv.toPublicKey().toString().toLowerCase()).toBe(keys.ownerPubHex);
+    const agentView = new KeyDeriver(agent).derivePublicKey(
+      AGENT_ALLOWANCE_PROTOCOL_ID,
+      id,
+      owner.toPublicKey().toString(),
+      true,
+    );
+    expect(agentView.toString().toLowerCase()).toBe(keys.agentPubHex);
   });
 });
 
@@ -204,18 +224,24 @@ describe("fundAllowance", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       const funded = Transaction.fromHex(raw);
-      const lock = lockingScriptHex(agent, vault.key.toPublicKey().toString());
-      const rev = revocationScriptHex(vault.key.toPublicKey().toString());
+      const saved = JSON.parse(readFileSync(join(root, "allowance.json"), "utf8"));
+      const keys = deriveAllowanceKeys(vault.key, agent, saved.allowanceId);
+      const lock = lockingScriptHex(keys.agentPubHex, keys.ownerPubHex);
+      const rev = revocationScriptHex(keys.ownerPubHex);
+      expect(lock).not.toBe(lockingScriptHex(agent, vault.key.toPublicKey().toString()));
       expect(funded.outputs[0].lockingScript.toHex()).toBe(lock);
       expect(funded.outputs[1].lockingScript.toHex()).toBe(lock);
       expect(funded.outputs[2].lockingScript.toHex()).toBe(rev);
       expect(funded.outputs[0].satoshis).toBe(2000);
       expect(funded.outputs[1].satoshis).toBe(2000);
       expect(funded.outputs[2].satoshis).toBe(1);
-      const saved = JSON.parse(readFileSync(join(root, "allowance.json"), "utf8"));
       const inspected = inspectDescriptor(saved);
       expect(inspected.ok).toBe(true);
-      if (inspected.ok) expect(inspected.totalSats).toBe(4000);
+      if (inspected.ok) {
+        expect(inspected.totalSats).toBe(4000);
+        expect(inspected.ownerIdentityKey).toBe(vault.key.toPublicKey().toString().toLowerCase());
+        expect(inspected.agentIdentityKey).toBe(agent.toLowerCase());
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

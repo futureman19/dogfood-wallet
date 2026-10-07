@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { LockingScript, P2PKH, PrivateKey, Transaction, UnlockingScript } from "@bsv/sdk";
+import { LockingScript, KeyDeriver, P2PKH, PrivateKey, Transaction, UnlockingScript } from "@bsv/sdk";
 import { evaluateAllowanceFund, evaluateSweep, estimateFee, MAX_SPLIT_OUTPUTS } from "./policy";
 import { defaultBroadcast, defaultFetchTxHex, defaultFetchUtxos, selectUtxos, type Utxo } from "./send";
 import { loadUsage, loadVault, vaultPaths } from "./vault";
@@ -30,6 +30,20 @@ export function certificateType(): string {
 
 export function generateAllowanceId(): string {
   return randomBytes(16).toString("base64");
+}
+
+export function deriveAllowanceKeys(ownerRoot: PrivateKey, agentIdentityPubHex: string, allowanceId: string) {
+  const agentIdentity = compressedPub(agentIdentityPubHex);
+  const deriver = new KeyDeriver(ownerRoot);
+  const protocol = AGENT_ALLOWANCE_PROTOCOL_ID;
+  const ownerPub = deriver.derivePublicKey(protocol, allowanceId, agentIdentity, true);
+  const agentPub = deriver.derivePublicKey(protocol, allowanceId, agentIdentity, false);
+  const ownerPriv = deriver.derivePrivateKey(protocol, allowanceId, agentIdentity);
+  return {
+    ownerPubHex: compressedPub(ownerPub.toString()),
+    agentPubHex: compressedPub(agentPub.toString()),
+    ownerPriv,
+  };
 }
 
 function compressedPub(hex: string): string {
@@ -178,11 +192,11 @@ export async function fundAllowance(opts: {
   const decision = evaluateAllowanceFund(vault.policy, opts.amount, loadUsage(opts.root));
   if (!decision.ok) return decision;
 
-  let agentPub: string;
-  let ownerPub: string;
+  let agentIdentity: string;
+  let ownerIdentity: string;
   try {
-    agentPub = compressedPub(opts.agentPubHex);
-    ownerPub = compressedPub(vault.key.toPublicKey().toString());
+    agentIdentity = compressedPub(opts.agentPubHex);
+    ownerIdentity = compressedPub(vault.key.toPublicKey().toString());
   } catch {
     return { ok: false, code: "BAD_KEYS", message: "REJECTED: Agent pubkey must be compressed secp256k1 hex." };
   }
@@ -195,6 +209,9 @@ export async function fundAllowance(opts: {
       message: `REJECTED: Pieces must be 1..${MAX_SPLIT_OUTPUTS} and each at least 1 sat.`,
     };
   }
+
+  const allowanceId = generateAllowanceId();
+  const keys = deriveAllowanceKeys(vault.key, agentIdentity, allowanceId);
 
   const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
   const need = opts.amount + 1;
@@ -222,13 +239,13 @@ export async function fundAllowance(opts: {
     });
   }
 
-  const lock = LockingScript.fromHex(lockingScriptHex(agentPub, ownerPub));
+  const lock = LockingScript.fromHex(lockingScriptHex(keys.agentPubHex, keys.ownerPubHex));
   const base = Math.floor(opts.amount / pieces);
   const rem = opts.amount - base * pieces;
   for (let i = 0; i < pieces; i++) {
     tx.addOutput({ satoshis: base + (i < rem ? 1 : 0), lockingScript: lock });
   }
-  tx.addOutput({ satoshis: 1, lockingScript: LockingScript.fromHex(revocationScriptHex(ownerPub)) });
+  tx.addOutput({ satoshis: 1, lockingScript: LockingScript.fromHex(revocationScriptHex(keys.ownerPubHex)) });
   const change = total - opts.amount - 1 - actualFee;
   if (change > 1) {
     tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(vault.address) });
@@ -243,10 +260,10 @@ export async function fundAllowance(opts: {
   }));
   const descriptor = {
     version: "1.0",
-    allowanceId: generateAllowanceId(),
+    allowanceId,
     purpose: opts.purpose ?? "dogfood allowance",
-    ownerIdentityKey: ownerPub,
-    agentIdentityKey: agentPub,
+    ownerIdentityKey: ownerIdentity,
+    agentIdentityKey: agentIdentity,
     protocolID: [...AGENT_ALLOWANCE_PROTOCOL_ID],
     outputs,
     revocationOutpoint: `${txid}.${pieces}`,
@@ -304,6 +321,7 @@ export async function sweepAllowance(opts: {
     };
   }
 
+  const keys = deriveAllowanceKeys(vault.key, inspected.agentIdentityKey, inspected.allowanceId);
   const tx = new Transaction();
   const hexCache = new Map<string, string>();
   for (const p of points) {
@@ -318,7 +336,7 @@ export async function sweepAllowance(opts: {
       sourceTXID: p.txid,
       sourceOutputIndex: p.vout,
       unlockingScriptTemplate:
-        p.kind === "allowance" ? unlockChecksig(vault.key, "OP_0") : unlockChecksig(vault.key),
+        p.kind === "allowance" ? unlockChecksig(keys.ownerPriv, "OP_0") : unlockChecksig(keys.ownerPriv),
     });
   }
   tx.addOutput({ satoshis: total - fee, lockingScript: new P2PKH().lock(to) });

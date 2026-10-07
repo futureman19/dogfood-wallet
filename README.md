@@ -103,14 +103,14 @@ Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-25
 
 ## BRC-0204 (script + descriptor, not a live allowance)
 
-[BRC-0204](https://bsv.brc.dev/wallet/0204) is a two-branch lock: the agent spends with `OP_1`, the owner sweeps with `OP_0`, plus a 1-sat revocation output. Dogfood can **fund and owner-sweep** that shape using the vault key as owner. It does **not** derive Type42 keys or issue BRC-52 certificates.
+[BRC-0204](https://bsv.brc.dev/wallet/0204) is a two-branch lock: the agent spends with `OP_1`, the owner sweeps with `OP_0`, plus a 1-sat revocation output. Dogfood **funds and owner-sweeps** that shape. Locking keys are Type42-derived (`protocolID` `[2, "agent allowance"]`, `keyID` = `allowanceId`, counterparty = agent identity). The vault key is the owner **identity**, not the key on the lock. No BRC-52 certificate yet.
 
 ```bash
 bun src/cli.ts allowance-script <agent-pubkey-hex> <owner-pubkey-hex>
 bun src/cli.ts allowance-inspect <descriptor-json-or-file>
 ```
 
-Human-only. Not MCP. Owner key is the vault key (not Type42). Agent key is the pubkey you pass in. Not a BRC-52 certificate.
+Human-only. Not MCP. Owner identity is the vault key. Allowance locking keys are Type42 children. Agent identity is the pubkey you pass in. Not a BRC-52 certificate.
 
 ```bash
 bun src/cli.ts allowance-fund <agent-pubkey-hex> <sats> [pieces]
@@ -122,7 +122,7 @@ bun src/cli.ts allowance-sweep [p2pkh-address]
 ## Later
 
 - Live Merkle Works delegator URL (you set `DOGFOOD_X402_DELEGATOR_URL`; we do not start their gateway)
-- Type42 / BRC-52 on the allowance (owner identity key, not the vault P2PKH key)
+- BRC-52 certificate on the allowance (issue + selective reveal)
 - BRC-181 signed PolicyRecord
 - PeerPay / BRC-100 funding from Yours
 

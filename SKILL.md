@@ -30,7 +30,7 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 3. Policy lives in `src/policy.ts` (`evaluateSend` + `usageFromLog`). Wire usage from `spends.jsonl` in `sendPayment` — do not re-check caps only in the CLI.
 4. Human-only mutations (`allow`, `sweep`, `split`, `allowance-script`, `allowance-inspect`, `allowance-fund`, `allowance-sweep`, deleting `STOP_SPENDING`) stay off MCP. Agents get `address` / `balance` / `status` / `send` / `kill` / `x402_inspect` / `x402_proof` / `x402_delegate`. Sweep bypasses caps/allowlist/killfile so the owner can reclaim funds. Split is self-send pocket change (killfile still applies; does not eat spend caps).
 5. x402: inspect + proof + delegator client. `x402-delegate` / `x402_delegate` POST `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402`. Unset URL → NEED_DELEGATOR, no fetch, no demo host. Broadcast is off unless `--broadcast` / `broadcast: true` / `DOGFOOD_X402_BROADCAST=1` (ARC, same as send). Coin selection is smallest-first so split pocket-change is actually used.
-6. BRC-0204: script + descriptor + fund/sweep. `allowance-fund` spends vault coins into the two-branch lock (agent `OP_1`, owner `OP_0`) plus 1-sat revocation. Counts against sat caps; killfile blocks; empty allowlist does not. `allowance-sweep` owner-branch even with killfile. Owner = vault key, not Type42. Not BRC-52. Not MCP.
+6. BRC-0204: script + descriptor + fund/sweep. Locking keys are Type42 (`[2, "agent allowance"]`, keyID = allowanceId, counterparty = agent identity). Vault key is owner identity, not the lock. `allowance-fund` counts against sat caps; killfile blocks; empty allowlist does not. `allowance-sweep` uses the derived owner priv even with killfile. Not BRC-52. Not MCP.
 7. `bun test`, commit, `git push origin main`.
 
 ## Product rules
@@ -45,7 +45,7 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 ## Next slices (user picks)
 
 1. Point `DOGFOOD_X402_DELEGATOR_URL` at a live Merkle Works `make demo` (client + opt-in broadcast are shipped; we do not start their gateway)
-2. Type42 / BRC-52 on the allowance (identity keys, not the vault P2PKH key)
+2. BRC-52 certificate on the allowance (issue + selective reveal)
 3. BRC-181 signed PolicyRecord
 
 ## Pitfalls
