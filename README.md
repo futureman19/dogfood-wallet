@@ -101,10 +101,22 @@ Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-25
 
 `x402-delegate` POSTs `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402` (Merkle Works wire format), then builds `X402-Proof`. Unset URL → `NEED_DELEGATOR` (no fetch, no demo host). Policy still gates the payee. Broadcast is **off** unless `--broadcast` or `DOGFOOD_X402_BROADCAST=1` (uses the same GorillaPool ARC path as `send`). The merchant nonce UTXO is theirs; Dogfood does not spend local vault coins on it.
 
+## BRC-0204 (script + descriptor, not a live allowance)
+
+[BRC-0204](https://bsv.brc.dev/wallet/0204) is a two-branch lock: the agent spends with `OP_1`, the owner sweeps with `OP_0`, plus a 1-sat revocation output. Dogfood currently **inspects** that shape. It does **not** derive Type42 keys, issue BRC-52 certificates, or fund/sweep those outputs.
+
+```bash
+bun src/cli.ts allowance-script <agent-pubkey-hex> <owner-pubkey-hex>
+bun src/cli.ts allowance-inspect <descriptor-json-or-file>
+```
+
+Human-only. Not MCP. Not a funded allowance.
+
 ## Later
 
-- BRC-181 wallet-enforced policy
-- BRC-0204 on-chain allowance the owner can sweep
+- Live Merkle Works delegator URL (you set `DOGFOOD_X402_DELEGATOR_URL`; we do not start their gateway)
+- BRC-0204 fund + owner-branch sweep (Type42 keys, real outputs)
+- BRC-181 signed PolicyRecord
 - PeerPay / BRC-100 funding from Yours
 
 ## Dev

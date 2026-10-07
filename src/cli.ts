@@ -3,7 +3,9 @@ import { defaultFetchUtxos } from "./send";
 import { sendPayment, sweepPayment, splitPayment } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { settleX402 } from "./delegator";
+import { inspectDescriptor, lockingScriptHex, revocationScriptHex } from "./allowance";
 import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault } from "./vault";
+import { readFileSync, existsSync } from "node:fs";
 
 function die(msg: string, code = 1): never {
   console.error(msg);
@@ -24,11 +26,13 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts x402-inspect <X402-Challenge-header>
   bun src/cli.ts x402-proof <X402-Challenge-header> <rawtx-hex> [method] [path]
   bun src/cli.ts x402-delegate <X402-Challenge-header> [method] [path] [--broadcast]
+  bun src/cli.ts allowance-script <agent-pubkey-hex> <owner-pubkey-hex>
+  bun src/cli.ts allowance-inspect <descriptor-json-or-file>
   bun src/cli.ts mcp
   bun src/cli.ts mcp-http
 
 The LLM never sees the key. Policy lives in the signer.
-allow, sweep, and split are human-only (not MCP tools).
+allow, sweep, split, and allowance-* are human-only (not MCP tools).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
 
@@ -156,6 +160,31 @@ async function main() {
         path: positional[1] || challenge.path,
         broadcast: wantBroadcast ? true : undefined,
       });
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) process.exit(1);
+      break;
+    }
+    case "allowance-script": {
+      if (!a || !b) die("Usage: allowance-script <agent-pubkey-hex> <owner-pubkey-hex>");
+      try {
+        const lock = lockingScriptHex(a, b);
+        const revocation = revocationScriptHex(b);
+        console.log(JSON.stringify({ lock, revocation, agentUnlock: "<sig> OP_1", ownerUnlock: "<sig> OP_0" }, null, 2));
+      } catch {
+        die("REJECTED: Pubkeys must be compressed secp256k1 hex (02/03 + 32 bytes).");
+      }
+      break;
+    }
+    case "allowance-inspect": {
+      if (!a) die("Usage: allowance-inspect <descriptor-json-or-file>");
+      const text = existsSync(a) ? readFileSync(a, "utf8") : [a, b, ...rest].filter(Boolean).join(" ");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        die("REJECTED: Descriptor is not JSON.");
+      }
+      const result = inspectDescriptor(parsed);
       console.log(JSON.stringify(result, null, 2));
       if (!result.ok) process.exit(1);
       break;
