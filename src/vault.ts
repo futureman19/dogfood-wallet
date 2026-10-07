@@ -3,7 +3,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PrivateKey } from "@bsv/sdk";
-import { DEFAULT_MAX_SATS, type Policy } from "./policy";
+import {
+  DEFAULT_MAX_SATS,
+  DEFAULT_MAX_SATS_PER_DAY,
+  isValidAddress,
+  usageFromLog,
+  type Policy,
+} from "./policy";
 
 export function defaultVaultDir(): string {
   return process.env.DOGFOOD_WALLET_DIR?.trim() || join(homedir(), ".dogfood-wallet");
@@ -52,8 +58,76 @@ export function initVault(root: string, maxSatsPerTx = DEFAULT_MAX_SATS): { addr
   writeFileSync(p.wrap, wrap, { mode: 0o600 });
   writeFileSync(p.enc, encryptWif(key.toWif(), wrap), { mode: 0o600 });
   writeFileSync(p.address, `${address}\n`, { mode: 0o644 });
-  writeFileSync(p.policy, `${JSON.stringify({ maxSatsPerTx }, null, 2)}\n`, { mode: 0o644 });
+  writePolicyFile(root, {
+    maxSatsPerTx,
+    maxSatsPerDay: DEFAULT_MAX_SATS_PER_DAY,
+    maxSatsLifetime: null,
+    allowlist: [],
+    killfileOn: false,
+  });
   return { address };
+}
+
+function optionalCap(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  return null;
+}
+
+function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    parsed = {};
+  }
+  const maxSatsPerTx =
+    typeof parsed.maxSatsPerTx === "number" && parsed.maxSatsPerTx > 0 ? parsed.maxSatsPerTx : DEFAULT_MAX_SATS;
+  const allowlist = Array.isArray(parsed.allowlist)
+    ? parsed.allowlist.filter((a): a is string => typeof a === "string")
+    : parsed.allowlist === undefined
+      ? null
+      : null;
+  return {
+    maxSatsPerTx,
+    maxSatsPerDay: optionalCap(parsed.maxSatsPerDay),
+    maxSatsLifetime: optionalCap(parsed.maxSatsLifetime),
+    allowlist,
+    killfileOn,
+  };
+}
+
+function writePolicyFile(root: string, policy: Policy): void {
+  const p = vaultPaths(root);
+  writeFileSync(
+    p.policy,
+    `${JSON.stringify(
+      {
+        maxSatsPerTx: policy.maxSatsPerTx,
+        maxSatsPerDay: policy.maxSatsPerDay,
+        maxSatsLifetime: policy.maxSatsLifetime,
+        allowlist: policy.allowlist,
+      },
+      null,
+      2,
+    )}\n`,
+    { mode: 0o644 },
+  );
+}
+
+export function allowDestination(root: string, address: string): string[] {
+  if (!isValidAddress(address)) throw new Error("Not a mainnet P2PKH address.");
+  const loaded = loadVault(root);
+  const list = loaded.policy.allowlist === null ? [] : [...loaded.policy.allowlist];
+  if (!list.includes(address)) list.push(address);
+  writePolicyFile(root, { ...loaded.policy, allowlist: list });
+  return list;
+}
+
+export function loadUsage(root: string, now = new Date()) {
+  const p = vaultPaths(root);
+  if (!existsSync(p.log)) return usageFromLog([], now);
+  return usageFromLog(readFileSync(p.log, "utf8").split(/\r?\n/), now);
 }
 
 export type LoadedVault = {
@@ -68,12 +142,15 @@ export function loadVault(root: string): LoadedVault {
   if (!existsSync(p.enc) || !existsSync(p.wrap) || !existsSync(p.address)) {
     throw new Error("Vault not initialized. Run: dogfood-wallet init");
   }
-  let maxSatsPerTx = DEFAULT_MAX_SATS;
+  let policy: Policy = {
+    maxSatsPerTx: DEFAULT_MAX_SATS,
+    maxSatsPerDay: null,
+    maxSatsLifetime: null,
+    allowlist: null,
+    killfileOn: existsSync(p.kill),
+  };
   if (existsSync(p.policy)) {
-    const parsed = JSON.parse(readFileSync(p.policy, "utf8")) as { maxSatsPerTx?: number };
-    if (typeof parsed.maxSatsPerTx === "number" && parsed.maxSatsPerTx > 0) {
-      maxSatsPerTx = parsed.maxSatsPerTx;
-    }
+    policy = parseStoredPolicy(readFileSync(p.policy, "utf8"), existsSync(p.kill));
   }
   const key = PrivateKey.fromWif(decryptWif(root));
   const address = readFileSync(p.address, "utf8").trim();
@@ -83,7 +160,7 @@ export function loadVault(root: string): LoadedVault {
   return {
     root,
     address,
-    policy: { maxSatsPerTx, killfileOn: existsSync(p.kill) },
+    policy,
     key,
   };
 }
@@ -98,17 +175,28 @@ export function statusVault(root: string): {
   address: string;
   network: "mainnet";
   cap: number;
+  maxSatsPerDay: number | null;
+  maxSatsLifetime: number | null;
+  allowlist: string[] | null;
+  spentToday: number;
+  spentLifetime: number;
   killfile: boolean;
   keyPresent: boolean;
 } {
   const p = vaultPaths(root);
   const initialized = existsSync(p.enc) && existsSync(p.wrap) && existsSync(p.address);
   const loaded = initialized ? loadVault(root) : null;
+  const usage = initialized ? loadUsage(root) : { spentToday: 0, spentLifetime: 0 };
   return {
     root,
     address: loaded?.address ?? (existsSync(p.address) ? readFileSync(p.address, "utf8").trim() : ""),
     network: "mainnet",
     cap: loaded?.policy.maxSatsPerTx ?? DEFAULT_MAX_SATS,
+    maxSatsPerDay: loaded?.policy.maxSatsPerDay ?? null,
+    maxSatsLifetime: loaded?.policy.maxSatsLifetime ?? null,
+    allowlist: loaded?.policy.allowlist ?? null,
+    spentToday: usage.spentToday,
+    spentLifetime: usage.spentLifetime,
     killfile: existsSync(p.kill),
     keyPresent: Boolean(loaded),
   };

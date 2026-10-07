@@ -23,17 +23,18 @@ bun install
 bun src/cli.ts init
 ```
 
-Fund the printed address. Default vault: `~/.dogfood-wallet` (override with `DOGFOOD_WALLET_DIR`). Default cap: **10,000 sats/tx**.
+Fund the printed address. Default vault: `~/.dogfood-wallet` (override with `DOGFOOD_WALLET_DIR`). New vaults: **10,000 sats/tx**, **50,000 sats/day**, **empty allowlist** (a human must `allow` a destination before the agent can send).
 
 ```bash
 bun src/cli.ts address
 bun src/cli.ts balance
 bun src/cli.ts status
+bun src/cli.ts allow <p2pkh-address>
 bun src/cli.ts send <p2pkh-address> <sats> [note]
 bun src/cli.ts kill
 ```
 
-`kill` writes `STOP_SPENDING`. A **human** deletes that file to resume. Agents must not.
+`allow` is **human-only** — it is not an MCP tool. `kill` writes `STOP_SPENDING`. A **human** deletes that file to resume. Agents must not.
 
 ## MCP
 
@@ -61,7 +62,10 @@ Hermes: same command, or `bun src/mcp.ts`.
 
 | Gate | Result |
 |---|---|
-| Amount > cap | `REJECTED: Exceeds cap of N sats/tx` |
+| Empty / miss allowlist | `REJECTED: Allowlist is empty` / `not on the allowlist` |
+| Amount > per-tx cap | `REJECTED: Exceeds cap of N sats/tx` |
+| Daily cap | `REJECTED: Exceeds daily cap of N sats (spent X, requested Y)` |
+| Lifetime cap | `REJECTED: Exceeds lifetime cap of N sats` |
 | Killfile on | `REJECTED: Killfile STOP_SPENDING is on` |
 | Bad address | `REJECTED: Destination is not a mainnet P2PKH address` |
 | Empty vault | `REJECTED: Insufficient funds` |

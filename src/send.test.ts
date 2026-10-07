@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initVault, killVault } from "./vault";
+import { initVault, killVault, allowDestination } from "./vault";
 import { sendPayment } from "./send";
 
 function scratch(): string {
@@ -16,6 +16,7 @@ describe("sendPayment policy gate", () => {
     const root = scratch();
     try {
       initVault(root);
+      allowDestination(root, TO);
       let fetched = false;
       const result = await sendPayment({
         root,
@@ -39,6 +40,7 @@ describe("sendPayment policy gate", () => {
     const root = scratch();
     try {
       initVault(root);
+      allowDestination(root, TO);
       killVault(root);
       let fetched = false;
       const result = await sendPayment({
@@ -63,6 +65,7 @@ describe("sendPayment policy gate", () => {
     const root = scratch();
     try {
       initVault(root);
+      allowDestination(root, TO);
       const result = await sendPayment({
         root,
         to: TO,
@@ -72,6 +75,29 @@ describe("sendPayment policy gate", () => {
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.code).toBe("INSUFFICIENT");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("does not fetch UTXOs when allowlist is empty", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      let fetched = false;
+      const result = await sendPayment({
+        root,
+        to: TO,
+        amount: 100,
+        fetchUtxos: async () => {
+          fetched = true;
+          return [];
+        },
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("ALLOWLIST");
+      expect(fetched).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

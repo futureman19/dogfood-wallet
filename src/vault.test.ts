@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initVault, loadVault, killVault, vaultPaths } from "./vault";
+import { initVault, loadVault, killVault, allowDestination, vaultPaths } from "./vault";
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "dogfood-wallet-"));
@@ -43,6 +43,8 @@ describe("vault", () => {
       const loaded = loadVault(root);
       expect(loaded.address).toBe(address);
       expect(loaded.policy.maxSatsPerTx).toBe(10_000);
+      expect(loaded.policy.maxSatsPerDay).toBe(50_000);
+      expect(loaded.policy.allowlist).toEqual([]);
       expect(loaded.policy.killfileOn).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -55,6 +57,18 @@ describe("vault", () => {
       initVault(root);
       killVault(root);
       expect(loadVault(root).policy.killfileOn).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("allowDestination is human-only persist of an address", () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      const list = allowDestination(root, "1GjcRUKdwqsnrxCHiDoHtF57rKqDd8oibT");
+      expect(list).toEqual(["1GjcRUKdwqsnrxCHiDoHtF57rKqDd8oibT"]);
+      expect(loadVault(root).policy.allowlist).toEqual(["1GjcRUKdwqsnrxCHiDoHtF57rKqDd8oibT"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

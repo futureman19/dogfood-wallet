@@ -23,7 +23,7 @@ export function createServer(root: string) {
 
   server.registerTool(
     "status",
-    { description: "Vault status: address, sat cap, killfile, whether a key is present. No secrets." },
+    { description: "Vault status: address, per-tx/daily/lifetime caps, allowlist, spend usage, killfile. No secrets. Cannot change the allowlist." },
     async () => text(statusVault(root)),
   );
 
@@ -39,6 +39,9 @@ export function createServer(root: string) {
         balanceSats: sats,
         utxos: utxos.length,
         capSatsPerTx: v.policy.maxSatsPerTx,
+        maxSatsPerDay: v.policy.maxSatsPerDay,
+        maxSatsLifetime: v.policy.maxSatsLifetime,
+        allowlist: v.policy.allowlist,
         killfile: v.policy.killfileOn,
       });
     },
@@ -48,7 +51,7 @@ export function createServer(root: string) {
     "send",
     {
       description:
-        "Pay satoshis to a mainnet P2PKH address. Rejected if over the sat cap, killfile is on, or funds are insufficient. Amount is satoshis, not USD.",
+        "Pay satoshis to a mainnet P2PKH address. Rejected if over per-tx/daily/lifetime caps, not on the allowlist, killfile is on, or funds are insufficient. Amount is satoshis, not USD. The agent cannot expand the allowlist.",
       inputSchema: {
         to: z.string().describe("Mainnet P2PKH address"),
         amount: z.number().int().positive().describe("Satoshis to send"),

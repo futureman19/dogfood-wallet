@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { defaultFetchUtxos } from "./send";
 import { sendPayment } from "./send";
-import { defaultVaultDir, initVault, killVault, loadVault, statusVault } from "./vault";
+import { allowDestination, defaultVaultDir, initVault, killVault, loadVault, statusVault } from "./vault";
 
 function die(msg: string, code = 1): never {
   console.error(msg);
@@ -14,11 +14,13 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts address
   bun src/cli.ts balance
   bun src/cli.ts status
+  bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [note]
   bun src/cli.ts kill
   bun src/cli.ts mcp
 
 The LLM never sees the key. Policy lives in the signer.
+allow is human-only (not an MCP tool).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
 
@@ -29,6 +31,8 @@ async function cmdBalance(root: string) {
   console.log(`Address: ${v.address}`);
   console.log(`Balance: ${sats} sats (${utxos.length} UTXOs)`);
   console.log(`Cap: ${v.policy.maxSatsPerTx} sats/tx`);
+  console.log(`Daily: ${v.policy.maxSatsPerDay ?? "none"}`);
+  console.log(`Allowlist: ${v.policy.allowlist === null ? "unrestricted" : v.policy.allowlist.length === 0 ? "(empty)" : v.policy.allowlist.join(", ")}`);
   console.log(`Killfile: ${v.policy.killfileOn ? "ON (STOP_SPENDING)" : "off"}`);
 }
 
@@ -46,6 +50,7 @@ async function main() {
       console.log(`Address: ${address}`);
       console.log(`Vault: ${root}`);
       console.log("Fund this address. Do not print or copy the key.");
+      console.log("Allowlist is empty. Human next: bun src/cli.ts allow <p2pkh-address>");
       break;
     }
     case "address":
@@ -60,8 +65,19 @@ async function main() {
       console.log(`Address: ${s.address || "(not initialized)"}`);
       console.log(`Network: ${s.network}`);
       console.log(`Cap: ${s.cap} sats/tx`);
+      console.log(`Daily: ${s.maxSatsPerDay ?? "none"} (spent ${s.spentToday})`);
+      console.log(`Lifetime: ${s.maxSatsLifetime ?? "none"} (spent ${s.spentLifetime})`);
+      console.log(
+        `Allowlist: ${s.allowlist === null ? "unrestricted" : s.allowlist.length === 0 ? "(empty)" : s.allowlist.join(", ")}`,
+      );
       console.log(`Killfile: ${s.killfile ? "on" : "off"}`);
       console.log(`Key present: ${s.keyPresent ? "yes" : "NO"}`);
+      break;
+    }
+    case "allow": {
+      if (!a) die("Usage: allow <p2pkh-address>");
+      const list = allowDestination(root, a);
+      console.log(`Allowlist: ${list.join(", ")}`);
       break;
     }
     case "kill":

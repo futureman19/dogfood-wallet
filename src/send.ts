@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs";
 import { P2PKH, Transaction } from "@bsv/sdk";
 import { evaluateSend } from "./policy";
-import { loadVault, vaultPaths } from "./vault";
+import { loadUsage, loadVault, vaultPaths } from "./vault";
 
 export type Utxo = { tx_hash: string; tx_pos: number; value: number };
 
@@ -65,7 +65,7 @@ export async function sendPayment(opts: {
   broadcast?: (raw: string) => Promise<{ txid: string }>;
 }): Promise<SendResult> {
   const vault = loadVault(opts.root);
-  const decision = evaluateSend(vault.policy, opts.amount, opts.to);
+  const decision = evaluateSend(vault.policy, opts.amount, opts.to, loadUsage(opts.root));
   if (!decision.ok) return decision;
 
   const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
