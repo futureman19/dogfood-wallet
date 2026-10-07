@@ -4,13 +4,6 @@ const REPO = "https://github.com/futureman19/dogfood-wallet";
 const README = `${REPO}#readme`;
 const MCP = `${REPO}#mcp`;
 
-const features = [
-  "Local signer. The model never sees a WIF.",
-  "Sat caps, empty allowlist fail-closed, killfile.",
-  "MCP for any agent. Signer stays on this machine.",
-  "Sweep is human-only. Not hosted custody.",
-];
-
 export default function App() {
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-300 font-sans selection:bg-emerald-500 selection:text-white relative overflow-hidden">
@@ -70,56 +63,129 @@ export default function App() {
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-4">
+          <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-5 pt-2">
+            <a href={REPO} className="group relative">
+              <div className="absolute -inset-0.5 bg-gradient-to-r from-emerald-500 to-green-500 rounded-lg blur opacity-30 group-hover:opacity-60 transition duration-500"></div>
+              <span className="relative w-full sm:w-auto bg-neutral-950 border border-emerald-500/50 text-emerald-400 px-6 py-3.5 rounded-lg font-mono text-sm sm:text-base font-bold flex items-center justify-center hover:bg-emerald-950/30 transition-all">
+                <span className="text-emerald-500/50 mr-2">$</span> bun src/cli.ts init
+              </span>
+            </a>
+
             <a
               href={REPO}
-              className="inline-flex items-center justify-center min-h-11 px-6 rounded-lg bg-emerald-500 text-neutral-950 font-semibold hover:bg-emerald-400 transition-colors"
+              className="w-full sm:w-auto px-6 py-3.5 border border-neutral-700 text-neutral-300 hover:text-white hover:border-neutral-500 rounded-lg font-medium transition-all flex items-center justify-center space-x-2 bg-neutral-900/30 backdrop-blur-sm"
             >
-              Clone the repo
-              <ChevronRight className="w-4 h-4 ml-1" />
-            </a>
-            <a
-              href={README}
-              className="inline-flex items-center justify-center min-h-11 px-6 rounded-lg border border-neutral-800 bg-neutral-900/60 hover:border-emerald-500 hover:text-emerald-400 transition-all"
-            >
-              <Terminal className="w-4 h-4 mr-2" />
-              Read the README
+              <Github className="w-5 h-5" />
+              <span>View GitHub Repo</span>
             </a>
           </div>
 
-          <ul className="space-y-3">
-            {features.map((line) => (
-              <li key={line} className="flex items-start gap-3 text-sm text-neutral-400">
-                <Check className="w-4 h-4 mt-0.5 text-emerald-400 shrink-0" />
-                <span>{line}</span>
-              </li>
-            ))}
+          <ul className="space-y-4 pt-6 text-neutral-300">
+            <li className="flex items-center space-x-3">
+              <div className="bg-emerald-500/10 p-1 rounded-full border border-emerald-500/20">
+                <Check className="w-4 h-4 text-emerald-500" />
+              </div>
+              <span className="text-[1.05rem]">Local policy engine & daily caps</span>
+            </li>
+            <li className="flex items-center space-x-3">
+              <div className="bg-emerald-500/10 p-1 rounded-full border border-emerald-500/20">
+                <Check className="w-4 h-4 text-emerald-500" />
+              </div>
+              <span className="text-[1.05rem]">One-shot instant sweep/kill-switch</span>
+            </li>
+            <li className="flex items-center space-x-3">
+              <div className="bg-emerald-500/10 p-1 rounded-full border border-emerald-500/20">
+                <Check className="w-4 h-4 text-emerald-500" />
+              </div>
+              <span className="text-[1.05rem]">MCP + CLI-first for easy agent attachment</span>
+            </li>
           </ul>
         </div>
 
-        <div className="relative">
-          <div className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-emerald-500/20 via-transparent to-transparent blur-lg" />
-          <div className="relative rounded-2xl border border-neutral-800 bg-neutral-900/80 backdrop-blur-sm overflow-hidden shadow-2xl">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-neutral-800">
-              <CircleDot className="w-3 h-3 text-red-400" />
-              <CircleDot className="w-3 h-3 text-amber-400" />
-              <CircleDot className="w-3 h-3 text-emerald-400" />
-              <span className="ml-2 text-xs font-mono text-neutral-500">bun src/cli.ts</span>
+        <div className="relative w-full lg:max-w-lg ml-auto perspective-[1000px]">
+          <div className="absolute -inset-1 bg-gradient-to-br from-emerald-500 via-green-600 to-transparent rounded-2xl blur-2xl opacity-20 transform rotate-[-2deg] scale-105"></div>
+
+          <div className="relative bg-[#0d1117] border border-neutral-800 rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/5 transform transition-transform hover:scale-[1.02] duration-500">
+            <div className="flex items-center px-4 py-3 border-b border-neutral-800/80 bg-[#0d1117]/80 backdrop-blur-md">
+              <div className="flex space-x-2">
+                <div className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/50 shadow-[0_0_5px_rgba(239,68,68,0.5)]"></div>
+                <div className="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500/50 shadow-[0_0_5px_rgba(234,179,8,0.5)]"></div>
+                <div className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500/50 shadow-[0_0_5px_rgba(34,197,94,0.5)]"></div>
+              </div>
+              <div className="mx-auto flex items-center space-x-2 text-xs text-neutral-500 font-mono">
+                <Terminal className="w-3.5 h-3.5 text-neutral-600" />
+                <span>dogfood-daemon — bash</span>
+              </div>
+              <div className="w-11"></div>
             </div>
-            <pre className="p-5 text-[13px] leading-relaxed font-mono text-neutral-300 overflow-x-auto">
-              <span className="text-emerald-400">$</span> bun src/cli.ts init{"\n"}
-              wrote ~/.dogfood-wallet{"\n"}
-              <span className="text-emerald-400">$</span> bun src/cli.ts status{"\n"}
-              killfile   off{"\n"}
-              cap        10000 sats/tx{"\n"}
-              allowlist  []{"\n"}
-              <span className="text-emerald-400">$</span> bun src/cli.ts send 1abc… 1000{"\n"}
-              <span className="text-red-400">REJECTED:</span> Allowlist is empty{"\n"}
-              <span className="text-emerald-400">$</span> bun src/cli.ts kill{"\n"}
-              STOP_SPENDING
-            </pre>
+
+            <div className="p-6 font-mono text-[13px] leading-relaxed space-y-5">
+              <div className="space-y-1.5">
+                <div className="flex items-center text-neutral-400">
+                  <span className="text-emerald-500 mr-2">~/agents</span>
+                  <span className="text-white">$ bun src/cli.ts status</span>
+                </div>
+                <div className="text-green-400 flex items-center">
+                  <span className="mr-2">[✓]</span> daemon running locally on port 38402
+                </div>
+                <div className="text-green-400 flex items-center">
+                  <span className="mr-2">[✓]</span> agent attached (MCP)
+                </div>
+                <div className="text-emerald-300 flex items-center">
+                  <span className="mr-2">[!]</span> allowance: 50,000 sats/day{" "}
+                  <span className="text-emerald-300/50 ml-1">(spent: 2,400)</span>
+                </div>
+                <div className="text-emerald-300 flex items-center">
+                  <span className="mr-2">[!]</span> allowlist: empty → fail-closed
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-neutral-800/80">
+                <div className="text-neutral-500 text-xs font-bold tracking-widest mb-3 flex items-center">
+                  <CircleDot className="w-3 h-3 mr-2 text-neutral-600" />
+                  RECENT TRANSACTIONS
+                </div>
+
+                <div className="space-y-2.5">
+                  <div className="flex justify-between items-center group hover:bg-white/5 p-1 -mx-1 rounded transition-colors">
+                    <div className="flex items-center text-neutral-400">
+                      <ChevronRight className="w-3.5 h-3.5 text-neutral-600 mr-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <span>- send 2,000 sats</span>
+                    </div>
+                    <span className="text-green-500 text-xs border border-green-500/20 bg-green-500/10 px-2 py-0.5 rounded shadow-[0_0_8px_rgba(34,197,94,0.15)]">
+                      Approved
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center group hover:bg-white/5 p-1 -mx-1 rounded transition-colors">
+                    <div className="flex items-center text-neutral-400">
+                      <ChevronRight className="w-3.5 h-3.5 text-neutral-600 mr-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <span>- send 5,000 sats</span>
+                    </div>
+                    <span className="text-green-500 text-xs border border-green-500/20 bg-green-500/10 px-2 py-0.5 rounded shadow-[0_0_8px_rgba(34,197,94,0.15)]">
+                      Approved
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center group hover:bg-white/5 p-1 -mx-1 rounded transition-colors">
+                    <div className="flex items-center text-neutral-500 line-through decoration-neutral-700">
+                      <ChevronRight className="w-3.5 h-3.5 text-neutral-600 mr-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <span>- send 15,000 sats</span>
+                    </div>
+                    <span className="text-red-500 text-xs border border-red-500/20 bg-red-500/10 px-2 py-0.5 rounded shadow-[0_0_8px_rgba(239,68,68,0.15)]">
+                      BLOCKED (Policy)
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center text-neutral-400">
+                <span className="text-emerald-500 mr-2">~/agents</span>
+                <span className="text-white">$ </span>
+                <span className="w-2 h-4 bg-emerald-500 ml-1 animate-pulse"></span>
+              </div>
+            </div>
           </div>
-          <p className="mt-4 text-xs text-neutral-500 font-mono">Open source. MIT. Not a hosted wallet.</p>
         </div>
       </main>
 
