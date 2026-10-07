@@ -4,6 +4,7 @@ import { sendPayment, sweepPayment, splitPayment } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { settleX402 } from "./delegator";
 import { inspectDescriptor, lockingScriptHex, revocationScriptHex, fundAllowance, sweepAllowance } from "./allowance";
+import { fundRequest } from "./fund-request";
 import { verifyPolicyEnvelope, loadPolicyEnvelope } from "./brc181";
 import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault, vaultPaths } from "./vault";
 import { readFileSync, existsSync } from "node:fs";
@@ -21,6 +22,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts status
   bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [note]
+  bun src/cli.ts fund-request <sats>
   bun src/cli.ts kill
   bun src/cli.ts sweep <p2pkh-address>
   bun src/cli.ts split [piece-sats]
@@ -36,7 +38,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts mcp-http
 
 The LLM never sees the key. Policy lives in the signer.
-allow, sweep, split, allowance-*, and policy-inspect are human-only (not MCP tools).
+allow, sweep, split, fund-request, allowance-*, and policy-inspect are human-only (not MCP tools).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
 
@@ -94,6 +96,14 @@ async function main() {
       if (!a) die("Usage: allow <p2pkh-address>");
       const list = allowDestination(root, a);
       console.log(`Allowlist: ${list.join(", ")}`);
+      break;
+    }
+    case "fund-request": {
+      if (!a) die("Usage: fund-request <sats>");
+      const vault = loadVault(root);
+      const result = fundRequest({ address: vault.address, sats: Number(a) });
+      if (!result.ok) die(result.message);
+      console.log(JSON.stringify(result, null, 2));
       break;
     }
     case "kill":

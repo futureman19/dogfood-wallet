@@ -31,12 +31,13 @@ bun src/cli.ts balance
 bun src/cli.ts status
 bun src/cli.ts allow <p2pkh-address>
 bun src/cli.ts send <p2pkh-address> <sats> [note]
+bun src/cli.ts fund-request <sats>
 bun src/cli.ts kill
 bun src/cli.ts sweep <p2pkh-address>
 bun src/cli.ts split [piece-sats]
 ```
 
-`allow`, `sweep`, and `split` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. Split turns one fat UTXO into up to 20 even self-outputs (default piece 10k sats, min 1k) so later agent sends are not serialized on a single coin. Split does **not** count against daily/lifetime caps. `kill` writes `STOP_SPENDING`. A **human** deletes that file to resume agent sends. Agents must not.
+`allow`, `sweep`, `split`, and `fund-request` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. Split turns one fat UTXO into up to 20 even self-outputs (default piece 10k sats, min 1k) so later agent sends are not serialized on a single coin. Split does **not** count against daily/lifetime caps. `kill` writes `STOP_SPENDING`. A **human** deletes that file to resume agent sends. Agents must not.
 
 ## MCP
 
@@ -103,14 +104,14 @@ Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-25
 
 ## BRC-0204 (script + descriptor, not a live allowance)
 
-[BRC-0204](https://bsv.brc.dev/wallet/0204) is a two-branch lock: the agent spends with `OP_1`, the owner sweeps with `OP_0`, plus a 1-sat revocation output. Dogfood **funds and owner-sweeps** that shape. Locking keys are Type42-derived (`protocolID` `[2, "agent allowance"]`, `keyID` = `allowanceId`, counterparty = agent identity). The vault key is the owner **identity**, not the key on the lock. Fund also issues a BRC-52 core certificate (type = SHA-256 of `agent allowance`) signed by the owner, bound to the revocation outpoint. Field revelation keyring stays on disk; it is not printed. Selective reveal to a payee is not implemented (needs the agent's key).
+[BRC-0204](https://bsv.brc.dev/wallet/0204) is a two-branch lock: the agent spends with `OP_1`, the owner sweeps with `OP_0`, plus a 1-sat revocation output. Dogfood **funds and owner-sweeps** that shape. Locking keys are Type42-derived (`protocolID` `[2, "agent allowance"]`, `keyID` = `allowanceId`, counterparty = agent identity). The vault key is the owner **identity**, not the key on the lock. Fund also issues a BRC-52 core certificate (type = SHA-256 of `agent allowance`) signed by the owner, bound to the revocation outpoint. Field revelation keyring stays on disk; it is not printed. `proveAllowanceCertificate` (library, not CLI) lets an **agent `ProtoWallet`** reveal selected fields to a verifier. Never pass an agent WIF on a CLI.
 
 ```bash
 bun src/cli.ts allowance-script <agent-pubkey-hex> <owner-pubkey-hex>
 bun src/cli.ts allowance-inspect <descriptor-json-or-file>
 ```
 
-Human-only. Not MCP. Owner identity is the vault key. Allowance locking keys are Type42 children. Agent identity is the pubkey you pass in. Not a BRC-52 certificate.
+Human-only. Not MCP. Owner identity is the vault key. Allowance locking keys are Type42 children. Agent identity is the pubkey you pass in.
 
 ```bash
 bun src/cli.ts allowance-fund <agent-pubkey-hex> <sats> [pieces]
@@ -132,8 +133,7 @@ If the vault contains `brc181.json`, **`send` and `x402-delegate` also verify th
 ## Later
 
 - Live Merkle Works delegator URL (you set `DOGFOOD_X402_DELEGATOR_URL`; we do not start their gateway)
-- BRC-52 selective reveal / proveCertificate for a payee (agent wallet)
-- PeerPay / BRC-100 funding from Yours
+- Yours Wallet `createAction` in a browser (`fund-request` only prints the payload)
 
 ## Dev
 

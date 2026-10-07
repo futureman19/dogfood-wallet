@@ -130,6 +130,37 @@ export async function inspectCertificate(
   }
 }
 
+export async function proveAllowanceCertificate(opts: {
+  certificate: AllowanceCertificate;
+  masterKeyring: Record<string, string>;
+  agentWallet: ProtoWallet;
+  verifierPubHex: string;
+  fieldsToReveal: string[];
+}): Promise<
+  | { ok: true; certificate: AllowanceCertificate; keyring: Record<string, string> }
+  | InspectFail
+> {
+  const unknown = opts.fieldsToReveal.filter((name) => !(name in opts.certificate.fields));
+  if (unknown.length > 0) {
+    return { ok: false, code: "BAD_REVEAL", message: "REJECTED: Reveal field is not on the certificate." };
+  }
+  try {
+    const verifier = compressedPub(opts.verifierPubHex);
+    const keyring = await MasterCertificate.createKeyringForVerifier(
+      opts.agentWallet,
+      opts.certificate.certifier,
+      verifier,
+      opts.certificate.fields,
+      opts.fieldsToReveal,
+      opts.masterKeyring,
+      opts.certificate.serialNumber,
+    );
+    return { ok: true, certificate: opts.certificate, keyring };
+  } catch {
+    return { ok: false, code: "BAD_REVEAL", message: "REJECTED: Could not prove certificate fields for that verifier." };
+  }
+}
+
 function compressedPub(hex: string): string {
   const h = hex.trim().toLowerCase().replace(/^0x/, "");
   if (!COMPRESSED.test(h)) throw new Error("BAD_PUBKEY");

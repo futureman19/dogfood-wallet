@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { Certificate, KeyDeriver, LockingScript, P2PKH, PrivateKey, Transaction } from "@bsv/sdk";
+import { Certificate, KeyDeriver, LockingScript, P2PKH, PrivateKey, ProtoWallet, Transaction, VerifiableCertificate } from "@bsv/sdk";
 import {
   AGENT_ALLOWANCE_PROTOCOL_ID,
   certificateType,
@@ -13,6 +13,7 @@ import {
   inspectCertificate,
   inspectDescriptor,
   issueAllowanceCertificate,
+  proveAllowanceCertificate,
   lockingScriptHex,
   parseAllowanceLock,
   revocationScriptHex,
@@ -115,6 +116,58 @@ describe("BRC-52 allowance certificate", () => {
     );
     expect(check.ok).toBe(false);
     if (!check.ok) expect(check.code).toBe("BAD_CERT");
+  });
+
+  test("agent proves purpose to a verifier without revealing allowanceId", async () => {
+    const owner = PrivateKey.fromRandom();
+    const agent = PrivateKey.fromRandom();
+    const verifier = PrivateKey.fromRandom();
+    const issued = await issueAllowanceCertificate({
+      ownerRoot: owner,
+      agentIdentityPubHex: agent.toPublicKey().toString(),
+      allowanceId: generateAllowanceId(),
+      purpose: "Competitor research",
+      revocationOutpoint: `${"ee".repeat(32)}.1`,
+    });
+    expect(issued.ok).toBe(true);
+    if (!issued.ok) return;
+    const proved = await proveAllowanceCertificate({
+      certificate: issued.certificate,
+      masterKeyring: issued.masterKeyring,
+      agentWallet: new ProtoWallet(agent),
+      verifierPubHex: verifier.toPublicKey().toString(),
+      fieldsToReveal: ["purpose"],
+    });
+    expect(proved.ok).toBe(true);
+    if (!proved.ok) return;
+    expect(JSON.stringify(proved)).not.toMatch(/\b5[HJK][1-9A-HJ-NP-Za-km-z]{50,}\b/);
+    const verifiable = VerifiableCertificate.fromCertificate(proved.certificate, proved.keyring);
+    const opened = await verifiable.decryptFields(new ProtoWallet(verifier));
+    expect(opened.purpose).toBe("Competitor research");
+    expect(opened.allowanceId).toBeUndefined();
+  });
+
+  test("prove refuses a field that is not on the cert", async () => {
+    const owner = PrivateKey.fromRandom();
+    const agent = PrivateKey.fromRandom();
+    const issued = await issueAllowanceCertificate({
+      ownerRoot: owner,
+      agentIdentityPubHex: agent.toPublicKey().toString(),
+      allowanceId: generateAllowanceId(),
+      purpose: "x",
+      revocationOutpoint: `${"ff".repeat(32)}.0`,
+    });
+    expect(issued.ok).toBe(true);
+    if (!issued.ok) return;
+    const proved = await proveAllowanceCertificate({
+      certificate: issued.certificate,
+      masterKeyring: issued.masterKeyring,
+      agentWallet: new ProtoWallet(agent),
+      verifierPubHex: PrivateKey.fromRandom().toPublicKey().toString(),
+      fieldsToReveal: ["notAField"],
+    });
+    expect(proved.ok).toBe(false);
+    if (!proved.ok) expect(proved.code).toBe("BAD_REVEAL");
   });
 });
 
