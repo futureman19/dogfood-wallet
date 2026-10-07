@@ -79,8 +79,26 @@ svg {
   object-fit: contain;
   mix-blend-mode: screen;
 }
+.brand:focus-visible {
+  outline: none;
+  border-radius: 0;
+  text-decoration: none;
+}
+.brand:focus-visible .brand-words {
+  box-shadow: 0 2px #a0ffc8;
+}
+.brand .brand-words {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-block: 7px;
+}
 .brand .brand-wordmark {
-  width: 100px;
+  width: 95px;
+  height: auto;
+}
+.brand .brand-wallet {
+  width: 65px;
   height: auto;
 }
 .hero-wordmark {
@@ -91,7 +109,13 @@ svg {
 }
 @media (max-width: 600px) {
   .brand .brand-wordmark {
-    width: 85px;
+    width: 70px;
+  }
+  .brand .brand-wallet {
+    width: 49px;
+  }
+  .brand .brand-words {
+    gap: 6px;
   }
   .hero-wordmark {
     margin-bottom: 10px;

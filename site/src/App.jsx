@@ -147,7 +147,14 @@ export default function App() {
       <header className="site-header page-width">
         <a className="brand" href="/" aria-label="Dogfood Wallet home">
           <img src="/cyber-bowl.png" alt="" />
-          <img className="brand-wordmark" src="/brand-wordmark.png" alt="" />
+          <span className="brand-words">
+            <img
+              className="brand-wordmark"
+              src="/dogfood-wordmark.png"
+              alt=""
+            />
+            <img className="brand-wallet" src="/wallet-wordmark.png" alt="" />
+          </span>
         </a>
         <nav aria-label="Main navigation">
           <a href={README}>Docs</a>
