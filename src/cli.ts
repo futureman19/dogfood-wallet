@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { defaultFetchUtxos } from "./send";
 import { sendPayment, sweepPayment, splitPayment } from "./send";
-import { decideX402, decodeChallengeHeader } from "./x402";
+import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault } from "./vault";
 
 function die(msg: string, code = 1): never {
@@ -21,6 +21,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts sweep <p2pkh-address>
   bun src/cli.ts split [piece-sats]
   bun src/cli.ts x402-inspect <X402-Challenge-header>
+  bun src/cli.ts x402-proof <X402-Challenge-header> <rawtx-hex> [method] [path]
   bun src/cli.ts mcp
   bun src/cli.ts mcp-http
 
@@ -121,6 +122,21 @@ async function main() {
       const result = decideX402(vault.policy, loadUsage(root), challenge);
       console.log(JSON.stringify(result, null, 2));
       if (!result.ok) process.exit(1);
+      break;
+    }
+    case "x402-proof": {
+      if (!a || !b) die("Usage: x402-proof <X402-Challenge-header> <rawtx-hex> [method] [path]");
+      const challenge = decodeChallengeHeader(a);
+      const proof = buildProof({
+        challenge,
+        rawtxHex: b,
+        method: rest[0] || "GET",
+        path: rest[1] || challenge.path || "/",
+        query: challenge.query,
+      });
+      const check = inspectProof(proof, { challenge, requestPath: proof.request.path });
+      if (!check.ok) die(check.message);
+      console.log(JSON.stringify({ header: encodeProofHeader(proof), proof }, null, 2));
       break;
     }
     case "mcp": {

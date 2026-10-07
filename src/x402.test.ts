@@ -12,6 +12,9 @@ import {
   headerBindingSha256,
   bodySha256FromHex,
   txidFromRawHex,
+  bindRequestHeaders,
+  buildProof,
+  inspectProof,
 } from "./x402";
 import { evaluateSend } from "./policy";
 import { DEFAULT_MAX_SATS } from "./policy";
@@ -32,6 +35,19 @@ const vectors = JSON.parse(
     body_bytes?: string;
     rawtx_hex?: string;
     txid?: string;
+    proof?: {
+      v: number;
+      scheme: string;
+      challenge_sha256: string;
+      payment: { txid: string; rawtx_b64: string };
+      request: {
+        method: string;
+        path: string;
+        query: string;
+        req_headers_sha256: string;
+        req_body_sha256: string;
+      };
+    };
   }>;
 };
 
@@ -123,5 +139,77 @@ describe("x402 payee + policy", () => {
     expect(d.ok).toBe(false);
     if (d.ok) return;
     expect(d.code).toBe("ALLOWLIST");
+  });
+});
+
+describe("x402 proof + header binding", () => {
+  test("bindRequestHeaders matches header_binding_canonical", () => {
+    const v = byName("header_binding_canonical");
+    const s = bindRequestHeaders({
+      Accept: "application/json",
+      "Content-Type": "text/plain",
+      "X402-Client": "test-client/1.0",
+    });
+    expect(s).toBe(v.header_binding_string);
+    expect(headerBindingSha256(s)).toBe(v.headers_sha256);
+  });
+
+  test("inspectProof rejects invalid_proof_version", () => {
+    const v = byName("invalid_proof_version");
+    const d = inspectProof(v.proof!);
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("VERSION");
+  });
+
+  test("inspectProof rejects invalid_txid_mismatch", () => {
+    const v = byName("invalid_txid_mismatch");
+    const d = inspectProof(
+      {
+        v: 1,
+        scheme: "bsv-tx-v1",
+        challenge_sha256: "aa".repeat(32),
+        payment: { txid: v.txid!, rawtx_b64: Buffer.from(v.rawtx_hex!, "hex").toString("base64") },
+        request: { method: "GET", path: "/", query: "", req_headers_sha256: "", req_body_sha256: "" },
+      },
+      { rawtxHex: v.rawtx_hex },
+    );
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("TXID");
+  });
+
+  test("inspectProof rejects path mismatch against challenge.path", () => {
+    const v = byName("invalid_binding_path_mismatch");
+    const d = inspectProof(
+      {
+        v: 1,
+        scheme: "bsv-tx-v1",
+        challenge_sha256: "aa".repeat(32),
+        payment: {
+          txid: txidFromRawHex("00"),
+          rawtx_b64: Buffer.from("00", "hex").toString("base64"),
+        },
+        request: { method: "GET", path: "/other", query: "", req_headers_sha256: "", req_body_sha256: "" },
+      },
+      { challenge: v.challenge as never, requestPath: "/other", rawtxHex: "00" },
+    );
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("PATH");
+  });
+
+  test("buildProof txid matches frozen rawtx vector", () => {
+    const raw = byName("txid_derivation");
+    const ch = byName("valid_get_empty");
+    const proof = buildProof({
+      challenge: ch.challenge as never,
+      rawtxHex: raw.rawtx_hex!,
+      method: "GET",
+      path: "/v1/resource",
+    });
+    expect(proof.v).toBe(1);
+    expect(proof.payment.txid).toBe(raw.txid);
+    expect(inspectProof(proof).ok).toBe(true);
   });
 });

@@ -3,13 +3,27 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initVault, killVault, allowDestination } from "./vault";
-import { sendPayment, sweepPayment, splitPayment } from "./send";
+import { sendPayment, sweepPayment, splitPayment, selectUtxos } from "./send";
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "dogfood-send-"));
 }
 
 const TO = "1GjcRUKdwqsnrxCHiDoHtF57rKqDd8oibT";
+
+describe("selectUtxos", () => {
+  test("prefers the smallest coin that covers amount plus fee", () => {
+    const { chosen } = selectUtxos(
+      [
+        { tx_hash: "aa", tx_pos: 0, value: 100_000 },
+        { tx_hash: "bb", tx_pos: 0, value: 5_000 },
+        { tx_hash: "cc", tx_pos: 0, value: 20_000 },
+      ],
+      100,
+    );
+    expect(chosen.map((u) => u.tx_hash)).toEqual(["bb"]);
+  });
+});
 
 describe("sendPayment policy gate", () => {
   test("does not fetch UTXOs when over cap", async () => {

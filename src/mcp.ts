@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { defaultFetchUtxos, sendPayment } from "./send";
-import { decideX402, decodeChallengeHeader } from "./x402";
+import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { defaultVaultDir, killVault, loadUsage, loadVault, statusVault } from "./vault";
 
 function text(obj: unknown, isError = false) {
@@ -87,6 +87,33 @@ export function createServer(root: string) {
       const vault = loadVault(root);
       const result = decideX402(vault.policy, loadUsage(root), decodeChallengeHeader(challenge));
       return text(result, !result.ok);
+    },
+  );
+
+  server.registerTool(
+    "x402_proof",
+    {
+      description:
+        "Build an X402-Proof header from a challenge and a raw settlement tx hex. Does not spend or broadcast. Nonce-UTXO construction still needs the merchant delegator.",
+      inputSchema: {
+        challenge: z.string().describe("X402-Challenge header value (base64url JSON)"),
+        rawtx_hex: z.string().describe("Raw settlement transaction hex"),
+        method: z.string().optional().describe("HTTP method of the paid request"),
+        path: z.string().optional().describe("HTTP path of the paid request"),
+      },
+    },
+    async ({ challenge, rawtx_hex, method, path }) => {
+      const decoded = decodeChallengeHeader(challenge);
+      const proof = buildProof({
+        challenge: decoded,
+        rawtxHex: rawtx_hex,
+        method: method || decoded.method || "GET",
+        path: path || decoded.path || "/",
+        query: decoded.query,
+      });
+      const check = inspectProof(proof, { challenge: decoded, requestPath: proof.request.path });
+      if (!check.ok) return text(check, true);
+      return text({ header: encodeProofHeader(proof), proof, txid: proof.payment.txid });
     },
   );
 

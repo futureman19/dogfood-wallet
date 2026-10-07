@@ -80,7 +80,9 @@ describe("listenHttp", () => {
       const names =
         (listed.json as { result?: { tools?: Array<{ name: string }> } }).result?.tools?.map((t) => t.name) ??
         [];
-      expect(names.sort()).toEqual(["address", "balance", "kill", "send", "status", "x402_inspect"].sort());
+      expect(names.sort()).toEqual(
+        ["address", "balance", "kill", "send", "status", "x402_inspect", "x402_proof"].sort(),
+      );
       expect(names).not.toContain("allow");
       expect(names).not.toContain("sweep");
       expect(JSON.stringify(listed.json)).not.toMatch(/\b5[HJK][1-9A-HJ-NP-Za-km-z]{50,52}\b/);

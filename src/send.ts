@@ -42,8 +42,8 @@ function feeFor(inputs: number, outputs: number): number {
   return 10 + inputs * 148 + outputs * 34;
 }
 
-function selectUtxos(utxos: Utxo[], amount: number): { chosen: Utxo[]; fee: number; total: number } {
-  const sorted = [...utxos].sort((a, b) => b.value - a.value);
+export function selectUtxos(utxos: Utxo[], amount: number): { chosen: Utxo[]; fee: number; total: number } {
+  const sorted = [...utxos].sort((a, b) => a.value - b.value);
   const chosen: Utxo[] = [];
   let total = 0;
   for (const u of sorted) {
