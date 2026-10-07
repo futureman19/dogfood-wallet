@@ -20,6 +20,7 @@ export type X402Challenge = {
     locking_script_hex: string;
   };
   require_mempool_accept?: boolean;
+  template?: { rawtx_hex: string; price_sats?: number };
 };
 
 export type X402Inspect =

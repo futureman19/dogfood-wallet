@@ -2,6 +2,7 @@
 import { defaultFetchUtxos } from "./send";
 import { sendPayment, sweepPayment, splitPayment } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
+import { settleX402 } from "./delegator";
 import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault } from "./vault";
 
 function die(msg: string, code = 1): never {
@@ -22,6 +23,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts split [piece-sats]
   bun src/cli.ts x402-inspect <X402-Challenge-header>
   bun src/cli.ts x402-proof <X402-Challenge-header> <rawtx-hex> [method] [path]
+  bun src/cli.ts x402-delegate <X402-Challenge-header> [method] [path]
   bun src/cli.ts mcp
   bun src/cli.ts mcp-http
 
@@ -137,6 +139,21 @@ async function main() {
       const check = inspectProof(proof, { challenge, requestPath: proof.request.path });
       if (!check.ok) die(check.message);
       console.log(JSON.stringify({ header: encodeProofHeader(proof), proof }, null, 2));
+      break;
+    }
+    case "x402-delegate": {
+      if (!a) die("Usage: x402-delegate <X402-Challenge-header> [method] [path]");
+      const vault = loadVault(root);
+      const challenge = decodeChallengeHeader(a);
+      const result = await settleX402({
+        policy: vault.policy,
+        usage: loadUsage(root),
+        challenge,
+        method: b || challenge.method,
+        path: rest[0] || challenge.path,
+      });
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) process.exit(1);
       break;
     }
     case "mcp": {

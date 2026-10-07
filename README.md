@@ -6,7 +6,7 @@ Open source. Not a hosted wallet. Not a consumer portfolio app.
 
 ## Architecture
 
-1. **Brain (agent)** — knows what to buy. Tools: `address`, `balance`, `status`, `send`, `kill`, `x402_inspect`.
+1. **Brain (agent)** — knows what to buy. Tools: `address`, `balance`, `status`, `send`, `kill`, `x402_inspect`, `x402_proof`, `x402_delegate`.
 2. **Vault (this repo)** — keys, sat cap, killfile, structured rejects.
 3. **Settlement** — BSV mainnet. Tiny fees so per-call payments are real.
 
@@ -87,15 +87,19 @@ The signer fails closed. The agent should pivot (cheaper source, stop), not retr
 - Not the shared Hermes QA treasury (`1Gjc…`). That key stays private.
 - Not Yours Wallet / BSV Association mobile (those are for humans).
 - Not Coinbase-style hosted custody.
-- Not an x402 **gateway**. Merkle Works [x402 v1](https://github.com/ruidasilva/merkleworks-x402-spec) is the BSV paywall we intend to *pay*. `x402-inspect` / `x402_inspect` decode the challenge and run policy. Settlement (spending the merchant nonce UTXO) is not implemented yet.
+- Not an x402 **gateway**. Merkle Works [x402 v1](https://github.com/ruidasilva/merkleworks-x402-spec) is the BSV paywall we intend to *pay*. We do not vendor their Go gateway.
 
-## x402 (payer, inspect-only)
+## x402 (payer)
 
 ```bash
 bun src/cli.ts x402-inspect <X402-Challenge>
+bun src/cli.ts x402-proof <X402-Challenge> <rawtx-hex>
+bun src/cli.ts x402-delegate <X402-Challenge>
 ```
 
-Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-256, base64url, header binding, body hash, Bitcoin txid). `x402-proof` builds `X402-Proof` from a raw tx; it does not spend the merchant nonce UTXO.
+Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-256, base64url, header binding, body hash, Bitcoin txid).
+
+`x402-delegate` POSTs `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402` (Merkle Works wire format), then builds `X402-Proof`. Unset URL → `NEED_DELEGATOR` (no fetch, no demo host). Policy still gates the payee. **Does not broadcast.** The merchant nonce UTXO is theirs; Dogfood does not spend local vault coins on it.
 
 ## Later
 

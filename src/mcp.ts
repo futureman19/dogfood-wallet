@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { defaultFetchUtxos, sendPayment } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
+import { settleX402 } from "./delegator";
 import { defaultVaultDir, killVault, loadUsage, loadVault, statusVault } from "./vault";
 
 function text(obj: unknown, isError = false) {
@@ -114,6 +115,31 @@ export function createServer(root: string) {
       const check = inspectProof(proof, { challenge: decoded, requestPath: proof.request.path });
       if (!check.ok) return text(check, true);
       return text({ header: encodeProofHeader(proof), proof, txid: proof.payment.txid });
+    },
+  );
+
+  server.registerTool(
+    "x402_delegate",
+    {
+      description:
+        "Ask the configured Merkle Works delegator (DOGFOOD_X402_DELEGATOR_URL) to complete a 402 settlement tx, then return X402-Proof. Policy-gated. Does not broadcast. Does not spend local vault coins on the nonce UTXO.",
+      inputSchema: {
+        challenge: z.string().describe("X402-Challenge header value (base64url JSON)"),
+        method: z.string().optional().describe("HTTP method of the paid request"),
+        path: z.string().optional().describe("HTTP path of the paid request"),
+      },
+    },
+    async ({ challenge, method, path }) => {
+      const vault = loadVault(root);
+      const decoded = decodeChallengeHeader(challenge);
+      const result = await settleX402({
+        policy: vault.policy,
+        usage: loadUsage(root),
+        challenge: decoded,
+        method,
+        path,
+      });
+      return text(result, !result.ok);
     },
   );
 
