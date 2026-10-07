@@ -4,6 +4,7 @@ import { sendPayment, sweepPayment, splitPayment } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { settleX402 } from "./delegator";
 import { inspectDescriptor, lockingScriptHex, revocationScriptHex, fundAllowance, sweepAllowance } from "./allowance";
+import { verifyPolicyEnvelope } from "./brc181";
 import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault } from "./vault";
 import { readFileSync, existsSync } from "node:fs";
 
@@ -30,11 +31,12 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts allowance-inspect <descriptor-json-or-file>
   bun src/cli.ts allowance-fund <agent-pubkey-hex> <sats> [pieces]
   bun src/cli.ts allowance-sweep [p2pkh-address]
+  bun src/cli.ts policy-inspect <envelope-json-or-file>
   bun src/cli.ts mcp
   bun src/cli.ts mcp-http
 
 The LLM never sees the key. Policy lives in the signer.
-allow, sweep, split, and allowance-* are human-only (not MCP tools).
+allow, sweep, split, allowance-*, and policy-inspect are human-only (not MCP tools).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
 
@@ -206,6 +208,22 @@ async function main() {
       if (!result.ok) die(result.message);
       console.log(`txid: ${result.txid}`);
       console.log(`swept: ${result.amount} sats (fee ${result.fee})`);
+      break;
+    }
+    case "policy-inspect": {
+      if (!a) die("Usage: policy-inspect <envelope-json-or-file>");
+      const text = existsSync(a) ? readFileSync(a, "utf8") : [a, b, ...rest].filter(Boolean).join(" ");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        die("REJECTED: Policy envelope is not JSON.");
+      }
+      const env = parsed as { payload?: Record<string, unknown>; sig?: { alg: string; issuer: string; signature: string } };
+      if (!env.payload || !env.sig) die("REJECTED: Envelope needs payload and sig.");
+      const result = verifyPolicyEnvelope({ payload: env.payload, sig: env.sig });
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) process.exit(1);
       break;
     }
     case "mcp": {

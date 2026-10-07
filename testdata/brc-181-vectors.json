@@ -1,0 +1,12 @@
+{
+  "vectorA": {
+    "canonical": "{\"account_id\":7,\"can_create_children\":false,\"cb_burst_per_s\":0,\"cb_max_new_dests\":0,\"child_budget_ceiling\":0,\"delegation_depth\":0,\"dest_allowlist\":[\"p2pkh:1111111111111111111111111111111111111111\"],\"dest_caps\":[],\"escalate_off_allowlist\":false,\"escalate_over_per_tx\":false,\"expiry_epoch\":0,\"issued_at\":1752710400,\"issuer\":\"03e9a2463c5ecaaaac49dc3ac382cae02cec513d342ee9a6c18e842c344f7b2bfb\",\"max_fee\":100,\"nonce\":\"a1b2c3d4e5f60718\",\"origin_token\":\"agt-marketplace-bidder-01\",\"per_tx_cap\":100,\"period_cap\":1000000000,\"period_window_s\":3600,\"purpose\":\"per-query metering, payee at a stable address\",\"rate_limit\":1000000,\"rate_window_s\":60,\"total_budget\":1000,\"type\":\"brc-181/agent-policy/1\"}",
+    "digest": "60ce6f775987fcf1d7291a67f20c46fbb6ff09147cdbb30660617badf48e8882",
+    "signature": "3044022025837bf6d69dec70d1bcfc715f939fbe4150c26b403455ac824f334cd28e956e02206cfd2b1f088eaf03321eb2a6f1964cbd2958e80dcc9700ae2ed89377009c0320",
+    "issuer": "03e9a2463c5ecaaaac49dc3ac382cae02cec513d342ee9a6c18e842c344f7b2bfb"
+  },
+  "vectorE": {
+    "canonical": "{\"account_id\":7,\"can_create_children\":false,\"cb_burst_per_s\":0,\"cb_max_new_dests\":0,\"child_budget_ceiling\":0,\"delegation_depth\":0,\"dest_allowlist\":[\"p2pkh:1111111111111111111111111111111111111111\"],\"dest_caps\":[],\"escalate_off_allowlist\":false,\"escalate_over_per_tx\":false,\"expiry_epoch\":0,\"issued_at\":1752710400,\"issuer\":\"03e9a2463c5ecaaaac49dc3ac382cae02cec513d342ee9a6c18e842c344f7b2bfb\",\"max_fee\":100,\"nonce\":\"a1b2c3d4e5f60718\",\"origin_token\":\"agt-marketplace-bidder-01\",\"per_tx_cap\":101,\"period_cap\":1000000000,\"period_window_s\":3600,\"purpose\":\"per-query metering, payee at a stable address\",\"rate_limit\":1000000,\"rate_window_s\":60,\"total_budget\":1000,\"type\":\"brc-181/agent-policy/1\"}",
+    "digest": "133f839214bff451e3ea39eed0ae8c95c74dbe965fb3bf39f981e8358f498efe"
+  }
+}

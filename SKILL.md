@@ -17,7 +17,7 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 - Repo: `C:/Users/futur/Desktop/dogfood-wallet`
 - GitHub: https://github.com/futureman19/dogfood-wallet (public, MIT)
 - Vault dir: `~/.dogfood-wallet` (`DOGFOOD_WALLET_DIR` override)
-- CLI: `bun src/cli.ts` (`init` / `address` / `balance` / `status` / `allow` / `send` / `kill` / `sweep` / `split` / `x402-inspect` / `x402-proof` / `x402-delegate` / `allowance-script` / `allowance-inspect` / `allowance-fund` / `allowance-sweep` / `mcp` / `mcp-http`)
+- CLI: `bun src/cli.ts` (`init` / `address` / `balance` / `status` / `allow` / `send` / `kill` / `sweep` / `split` / `x402-inspect` / `x402-proof` / `x402-delegate` / `allowance-script` / `allowance-inspect` / `allowance-fund` / `allowance-sweep` / `policy-inspect` / `mcp` / `mcp-http`)
 - Tests: `bun test` from the repo root before commit. Push `main` after green.
 - x402 vectors: `testdata/x402-vectors-v1.json` (Merkle Works v1 frozen). Codec lives in `src/x402.ts`.
 
@@ -28,9 +28,10 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 1. `git status --short` in `Desktop/dogfood-wallet` only.
 2. TDD on policy/send/vault: write the failing test, run `bun test`, then the minimum signer change.
 3. Policy lives in `src/policy.ts` (`evaluateSend` + `usageFromLog`). Wire usage from `spends.jsonl` in `sendPayment` — do not re-check caps only in the CLI.
-4. Human-only mutations (`allow`, `sweep`, `split`, `allowance-script`, `allowance-inspect`, `allowance-fund`, `allowance-sweep`, deleting `STOP_SPENDING`) stay off MCP. Agents get `address` / `balance` / `status` / `send` / `kill` / `x402_inspect` / `x402_proof` / `x402_delegate`. Sweep bypasses caps/allowlist/killfile so the owner can reclaim funds. Split is self-send pocket change (killfile still applies; does not eat spend caps).
+4. Human-only mutations (`allow`, `sweep`, `split`, `allowance-script`, `allowance-inspect`, `allowance-fund`, `allowance-sweep`, `policy-inspect`, deleting `STOP_SPENDING`) stay off MCP. Agents get `address` / `balance` / `status` / `send` / `kill` / `x402_inspect` / `x402_proof` / `x402_delegate`. Sweep bypasses caps/allowlist/killfile so the owner can reclaim funds. Split is self-send pocket change (killfile still applies; does not eat spend caps).
 5. x402: inspect + proof + delegator client. `x402-delegate` / `x402_delegate` POST `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402`. Unset URL → NEED_DELEGATOR, no fetch, no demo host. Broadcast is off unless `--broadcast` / `broadcast: true` / `DOGFOOD_X402_BROADCAST=1` (ARC, same as send). Coin selection is smallest-first so split pocket-change is actually used.
 6. BRC-0204: script + descriptor + fund/sweep + BRC-52 issue. Locking keys are Type42 (`[2, "agent allowance"]`, keyID = allowanceId). Vault key is owner identity. Fund issues a signed BRC-52 core cert bound to the revocation outpoint. masterKeyring stays on disk, not printed, not MCP. No proveCertificate / selective reveal yet.
+7. BRC-181: inspect/verify a signed PolicyRecord (`src/brc181.ts`) against `testdata/brc-181-vectors.json`. Canonical dest + Vector A/E/D. Live send still uses local `policy.json`. Not MCP. Not concurrent ledger.
 7. `bun test`, commit, `git push origin main`.
 
 ## Product rules
@@ -46,7 +47,7 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 
 1. Point `DOGFOOD_X402_DELEGATOR_URL` at a live Merkle Works `make demo` (client + opt-in broadcast are shipped; we do not start their gateway)
 2. BRC-52 selective reveal / proveCertificate for a payee (needs the agent key)
-3. BRC-181 signed PolicyRecord
+3. Bind live `send` to a verified BRC-181 envelope
 
 ## Pitfalls
 

@@ -119,11 +119,19 @@ bun src/cli.ts allowance-sweep [p2pkh-address]
 
 `allowance-fund` spends vault coins into the two-branch lock plus a 1-sat revocation output. Counts against sat caps. Killfile blocks it. Empty allowlist does **not** (destination is a script). `allowance-sweep` spends the owner branch + revocation even if the killfile is on.
 
+## BRC-181 policy inspect
+
+```bash
+bun src/cli.ts policy-inspect <envelope-json-or-file>
+```
+
+Verifies a signed `brc-181/agent-policy/1` envelope against frozen vectors (`testdata/brc-181-vectors.json`). Canonical dest is `p2pkh:<hash160>` or `script:<sha256>`; OP_RETURN is not a dest. Human-only. Not MCP. Live `send` still uses local `policy.json` — this does not replace the vault signer.
+
 ## Later
 
 - Live Merkle Works delegator URL (you set `DOGFOOD_X402_DELEGATOR_URL`; we do not start their gateway)
 - BRC-52 selective reveal / proveCertificate for a payee (agent wallet)
-- BRC-181 signed PolicyRecord
+- Bind live `send` to a verified BRC-181 envelope (today send still uses local `policy.json`)
 - PeerPay / BRC-100 funding from Yours
 
 ## Dev
