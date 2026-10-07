@@ -7,6 +7,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import VaultPreview from "./VaultPreview";
+import FundWithYours from "./FundWithYours";
 import "./bowlDemo.css";
 
 const REPO = "https://github.com/futureman19/dogfood-wallet";
@@ -76,6 +77,7 @@ export default function App() {
               <Github size={16} /> View source <ArrowUpRight size={14} />
             </a>
           </div>
+          <FundWithYours />
           <p className="install-note">
             Clone the repo + install with Bun first.{" "}
             <a href={`${REPO}#install`}>

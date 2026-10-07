@@ -260,6 +260,62 @@ h2 span {
   color: #b7ccbf;
   padding-block: 3px;
 }
+.yours-fund {
+  display: grid;
+  gap: 10px;
+  max-width: 445px;
+  margin: 0 0 18px;
+  padding: 14px;
+  border: 1px solid #1c2a22;
+  border-radius: 10px;
+  background: #08140e;
+}
+.yours-fund-label {
+  margin: 0;
+  font-size: 12px;
+  color: #9bab9f;
+}
+.yours-fund-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.yours-fund input {
+  flex: 1 1 140px;
+  min-width: 0;
+  background: #041109;
+  border: 1px solid #1f3328;
+  color: #d7e8dc;
+  border-radius: 7px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.yours-fund button {
+  justify-self: start;
+  background: #75efa3;
+  color: #082113;
+  border: 1px solid #a7ffc4;
+  border-radius: 7px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.yours-fund button:disabled {
+  opacity: 0.55;
+}
+.yours-fund-status,
+.yours-fund-error,
+.yours-fund-ok {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.yours-fund-error {
+  color: #f3a7a7;
+}
+.yours-fund-ok a {
+  color: #75efa3;
+}
 .features {
   list-style: none;
   margin: 0;

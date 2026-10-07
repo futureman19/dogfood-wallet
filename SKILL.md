@@ -47,7 +47,6 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 ## Next slices (user picks)
 
 1. Point `DOGFOOD_X402_DELEGATOR_URL` at a live Merkle Works `make demo` (client + opt-in broadcast are shipped; we do not start their gateway)
-2. Wire Yours Wallet `createAction` in a browser using `fund-request` JSON (needs the extension + a click)
 
 ## Pitfalls
 

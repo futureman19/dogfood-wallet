@@ -32,6 +32,7 @@ bun src/cli.ts status
 bun src/cli.ts allow <p2pkh-address>
 bun src/cli.ts send <p2pkh-address> <sats> [note]
 bun src/cli.ts fund-request <sats>
+# or paste that address into the Yours button on https://dogfoodwallet.com
 bun src/cli.ts kill
 bun src/cli.ts sweep <p2pkh-address>
 bun src/cli.ts split [piece-sats]
@@ -133,7 +134,6 @@ If the vault contains `brc181.json`, **`send` and `x402-delegate` also verify th
 ## Later
 
 - Live Merkle Works delegator URL (you set `DOGFOOD_X402_DELEGATOR_URL`; we do not start their gateway)
-- Yours Wallet `createAction` in a browser (`fund-request` only prints the payload)
 
 ## Dev
 
