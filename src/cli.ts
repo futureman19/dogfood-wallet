@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 import { defaultFetchUtxos } from "./send";
 import { sendPayment } from "./send";
-import { allowDestination, defaultVaultDir, initVault, killVault, loadVault, statusVault } from "./vault";
+import { decideX402, decodeChallengeHeader } from "./x402";
+import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault } from "./vault";
 
 function die(msg: string, code = 1): never {
   console.error(msg);
@@ -17,6 +18,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [note]
   bun src/cli.ts kill
+  bun src/cli.ts x402-inspect <X402-Challenge-header>
   bun src/cli.ts mcp
 
 The LLM never sees the key. Policy lives in the signer.
@@ -91,6 +93,15 @@ async function main() {
       if (!result.ok) die(result.message);
       console.log(`txid: ${result.txid}`);
       console.log(`sent: ${result.amount} sats to ${result.to} (fee ${result.fee})`);
+      break;
+    }
+    case "x402-inspect": {
+      if (!a) die("Usage: x402-inspect <X402-Challenge-header>");
+      const vault = loadVault(root);
+      const challenge = decodeChallengeHeader(a);
+      const result = decideX402(vault.policy, loadUsage(root), challenge);
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) process.exit(1);
       break;
     }
     case "mcp": {

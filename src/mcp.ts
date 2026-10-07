@@ -3,7 +3,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { defaultFetchUtxos, sendPayment } from "./send";
-import { defaultVaultDir, killVault, loadVault, statusVault } from "./vault";
+import { decideX402, decodeChallengeHeader } from "./x402";
+import { defaultVaultDir, killVault, loadUsage, loadVault, statusVault } from "./vault";
 
 function text(obj: unknown, isError = false) {
   return {
@@ -70,6 +71,22 @@ export function createServer(root: string) {
     async () => {
       killVault(root);
       return text({ killed: true, message: "STOP_SPENDING set." });
+    },
+  );
+
+  server.registerTool(
+    "x402_inspect",
+    {
+      description:
+        "Decode a Merkle Works x402 v1 X402-Challenge header and run Dogfood policy (caps, allowlist, kill, expiry). Does not settle or broadcast. The nonce UTXO spend is not implemented.",
+      inputSchema: {
+        challenge: z.string().describe("X402-Challenge header value (base64url JSON)"),
+      },
+    },
+    async ({ challenge }) => {
+      const vault = loadVault(root);
+      const result = decideX402(vault.policy, loadUsage(root), decodeChallengeHeader(challenge));
+      return text(result, !result.ok);
     },
   );
 

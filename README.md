@@ -6,7 +6,7 @@ Open source. Not a hosted wallet. Not a consumer portfolio app.
 
 ## Architecture
 
-1. **Brain (agent)** — knows what to buy. Tools only: `address`, `balance`, `status`, `send`, `kill`.
+1. **Brain (agent)** — knows what to buy. Tools: `address`, `balance`, `status`, `send`, `kill`, `x402_inspect`.
 2. **Vault (this repo)** — keys, sat cap, killfile, structured rejects.
 3. **Settlement** — BSV mainnet. Tiny fees so per-call payments are real.
 
@@ -77,9 +77,17 @@ The signer fails closed. The agent should pivot (cheaper source, stop), not retr
 - Not the shared Hermes QA treasury (`1Gjc…`). That key stays private.
 - Not Yours Wallet / BSV Association mobile (those are for humans).
 - Not Coinbase-style hosted custody.
-- Not HTTP 402 merchant rail (bsv.cx / BRC-166). This vault *pays* a 402; it is not the paywall.
+- Not an x402 **gateway**. Merkle Works [x402 v1](https://github.com/ruidasilva/merkleworks-x402-spec) is the BSV paywall we intend to *pay*. `x402-inspect` / `x402_inspect` decode the challenge and run policy. Settlement (spending the merchant nonce UTXO) is not implemented yet.
 
-## Later (not v0.1)
+## x402 (payer, inspect-only)
+
+```bash
+bun src/cli.ts x402-inspect <X402-Challenge>
+```
+
+Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-256, base64url).
+
+## Later
 
 - BRC-181 wallet-enforced policy
 - BRC-0204 on-chain allowance the owner can sweep
