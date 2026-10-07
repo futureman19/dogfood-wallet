@@ -1,4 +1,6 @@
 node_modules/
+dist/
+.vercel/
 *.enc
 wrap.key
 STOP_SPENDING

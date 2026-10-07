@@ -1,5 +1,7 @@
 {
-  "cleanUrls": true,
+  "buildCommand": "bun run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
   "headers": [
     {
       "source": "/(.*)",

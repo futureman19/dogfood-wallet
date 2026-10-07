@@ -1,144 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dogfood Wallet — a BSV vault your agent can spend from</title>
-  <meta name="description" content="Local BSV agent vault. The model asks. A signer on disk authorizes. The key never leaves the machine." />
-  <link rel="canonical" href="https://dogfoodwallet.com/" />
-  <meta property="og:title" content="Dogfood Wallet" />
-  <meta property="og:description" content="A wallet your agent can spend from. You never paste a key." />
-  <meta property="og:url" content="https://dogfoodwallet.com/" />
-  <meta property="og:type" content="website" />
-  <meta name="theme-color" content="#14110d" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,600&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --ink: #ece6d8;
-      --muted: #b7ad9a;
-      --dim: #7d7466;
-      --paper: #14110d;
-      --panel: #1d1914;
-      --line: #3a332b;
-      --copper: #c47a3a;
-      --copper-dim: #8a5424;
-      --good: #9bb07a;
-    }
-    * { box-sizing: border-box; }
-    html, body { margin: 0; background: var(--paper); color: var(--ink); }
-    body {
-      font-family: Newsreader, "Iowan Old Style", Georgia, serif;
-      min-height: 100vh;
-      background:
-        radial-gradient(1200px 600px at 80% -10%, rgba(196,122,58,0.12), transparent 50%),
-        radial-gradient(800px 400px at -10% 110%, rgba(155,176,122,0.08), transparent 45%),
-        var(--paper);
-    }
-    a { color: var(--copper); }
-    a:hover { color: #e09a55; }
-    .wrap { max-width: 920px; margin: 0 auto; padding: 28px 22px 80px; }
-    header {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 16px; padding-bottom: 28px; border-bottom: 1px solid var(--line);
-    }
-    .mark {
-      display: flex; align-items: center; gap: 10px;
-      font-family: "IBM Plex Mono", ui-monospace, monospace;
-      font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase;
-      color: var(--muted);
-    }
-    .bowl {
-      width: 22px; height: 22px; border: 1.5px solid var(--copper);
-      border-radius: 50% 50% 45% 45%;
-      position: relative;
-    }
-    .bowl::after {
-      content: ""; position: absolute; left: 4px; right: 4px; top: 8px;
-      height: 6px; border-bottom: 1.5px solid var(--copper); border-radius: 50%;
-    }
-    nav { display: flex; gap: 18px; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; }
-    nav a { color: var(--muted); text-decoration: none; }
-    nav a:hover { color: var(--ink); }
-    h1 {
-      font-weight: 600; font-size: clamp(36px, 7vw, 68px);
-      line-height: 1.05; letter-spacing: -0.03em; margin: 48px 0 18px;
-    }
-    .lede {
-      font-size: clamp(18px, 2.4vw, 24px); color: var(--muted);
-      max-width: 38rem; line-height: 1.35; margin: 0 0 32px;
-    }
-    .ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 56px; }
-    .btn {
-      display: inline-flex; align-items: center; justify-content: center;
-      min-height: 44px; padding: 0 18px; text-decoration: none;
-      font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px;
-      border: 1px solid var(--line); border-radius: 2px;
-    }
-    .btn.primary { background: var(--copper); color: #1a120b; border-color: var(--copper); }
-    .btn.primary:hover { background: #d48945; color: #1a120b; }
-    .btn.ghost { color: var(--ink); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
-    .card {
-      background: var(--panel); border: 1px solid var(--line); padding: 20px 18px 22px;
-    }
-    .card h2 {
-      font-family: "IBM Plex Mono", ui-monospace, monospace;
-      font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
-      color: var(--copper); font-weight: 500; margin: 0 0 10px;
-    }
-    .card p { margin: 0; color: var(--muted); font-size: 17px; line-height: 1.4; }
-    .rules {
-      margin-top: 48px; padding-top: 28px; border-top: 1px solid var(--line);
-      font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px;
-      color: var(--dim); line-height: 1.7;
-    }
-    .rules strong { color: var(--good); font-weight: 500; }
-    footer {
-      margin-top: 48px; color: var(--dim);
-      font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px;
-    }
-    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <header>
-      <div class="mark"><span class="bowl" aria-hidden="true"></span> Dogfood Wallet</div>
-      <nav>
-        <a href="https://github.com/futureman19/dogfood-wallet">GitHub</a>
-        <a href="https://github.com/futureman19/dogfood-wallet#readme">Docs</a>
-      </nav>
-    </header>
-
-    <h1>A wallet your agent can spend from.</h1>
-    <p class="lede">The model asks. A signer on your machine authorizes. The key never leaves disk. Open source BSV vault — not a hosted wallet, not a business.</p>
-    <div class="ctas">
-      <a class="btn primary" href="https://github.com/futureman19/dogfood-wallet">Clone the repo</a>
-      <a class="btn ghost" href="https://github.com/futureman19/dogfood-wallet/blob/main/README.md">Read the README</a>
-    </div>
-
-    <div class="grid">
-      <article class="card">
-        <h2>01 — Intent</h2>
-        <p>The agent emits a payment request. It never sees a WIF. Tools: balance, send, kill, x402.</p>
-      </article>
-      <article class="card">
-        <h2>02 — Policy</h2>
-        <p>Sat caps, allowlist, killfile. Empty allowlist is fail-closed. Sweep is human-only.</p>
-      </article>
-      <article class="card">
-        <h2>03 — Settlement</h2>
-        <p>BSV mainnet. Tiny fees. MCP for any agent runtime. Signer stays on this computer.</p>
-      </article>
-    </div>
-
-    <p class="rules">
-      <strong>MIT.</strong> TypeScript / Bun. Caps in sats, not USD.<br />
-      Not custody. Not a consumer portfolio app. Not Coinbase x402.
-    </p>
-    <footer>dogfoodwallet.com · futureman19/dogfood-wallet</footer>
-  </div>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dogfood Wallet — pocket change for agents, not your keys</title>
+    <meta name="description" content="Every AI agent gets a local BSV vault it can spend from—without a human clicking approve, and without the model ever seeing your private key." />
+    <link rel="canonical" href="https://dogfoodwallet.com/" />
+    <meta property="og:title" content="Dogfood Wallet" />
+    <meta property="og:description" content="Give your AI agents pocket change. Not your keys." />
+    <meta property="og:url" content="https://dogfoodwallet.com/" />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#0a0a0a" />
+  </head>
+  <body class="bg-neutral-950">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
 </html>
