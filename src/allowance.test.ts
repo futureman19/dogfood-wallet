@@ -1,16 +1,22 @@
 import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { LockingScript, PrivateKey } from "@bsv/sdk";
+import { LockingScript, P2PKH, PrivateKey, Transaction } from "@bsv/sdk";
 import {
   AGENT_ALLOWANCE_PROTOCOL_ID,
   certificateType,
+  fundAllowance,
   generateAllowanceId,
   inspectDescriptor,
   lockingScriptHex,
   parseAllowanceLock,
   revocationScriptHex,
+  sweepAllowance,
   unlockingAsm,
 } from "./allowance";
+import { initVault, killVault, loadVault } from "./vault";
 
 function compressedPub(): string {
   return PrivateKey.fromRandom().toPublicKey().toString();
@@ -114,5 +120,146 @@ describe("BRC-0204 descriptor inspect", () => {
     const r = inspectDescriptor({ ...ok, outputs: [] });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("BAD_OUTPUTS");
+  });
+});
+
+function scratch(): string {
+  return mkdtempSync(join(tmpdir(), "dogfood-allowance-"));
+}
+
+function vaultCoin(address: string, satoshis: number) {
+  const tx = new Transaction();
+  tx.addOutput({ satoshis, lockingScript: new P2PKH().lock(address) });
+  return { txid: tx.id("hex") as string, hex: tx.toHex(), satoshis };
+}
+
+describe("fundAllowance", () => {
+  test("does not fetch UTXOs when killfile is on", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      killVault(root);
+      let fetched = false;
+      const result = await fundAllowance({
+        root,
+        agentPubHex: compressedPub(),
+        amount: 1000,
+        fetchUtxos: async () => {
+          fetched = true;
+          return [];
+        },
+      });
+      expect(fetched).toBe(false);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("KILL");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("fetches even when allowlist is empty, then INSUFFICIENT", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      let fetched = false;
+      const result = await fundAllowance({
+        root,
+        agentPubHex: compressedPub(),
+        amount: 1000,
+        fetchUtxos: async () => {
+          fetched = true;
+          return [];
+        },
+      });
+      expect(fetched).toBe(true);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("INSUFFICIENT");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("broadcasts two allowance outputs plus a 1-sat revocation", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      const vault = loadVault(root);
+      const agent = compressedPub();
+      const coin = vaultCoin(vault.address, 50_000);
+      let raw = "";
+      const result = await fundAllowance({
+        root,
+        agentPubHex: agent,
+        amount: 4000,
+        pieces: 2,
+        fetchUtxos: async () => [{ tx_hash: coin.txid, tx_pos: 0, value: coin.satoshis }],
+        fetchTxHex: async () => coin.hex,
+        broadcast: async (hex) => {
+          raw = hex;
+          return { txid: Transaction.fromHex(hex).id("hex") as string };
+        },
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const funded = Transaction.fromHex(raw);
+      const lock = lockingScriptHex(agent, vault.key.toPublicKey().toString());
+      const rev = revocationScriptHex(vault.key.toPublicKey().toString());
+      expect(funded.outputs[0].lockingScript.toHex()).toBe(lock);
+      expect(funded.outputs[1].lockingScript.toHex()).toBe(lock);
+      expect(funded.outputs[2].lockingScript.toHex()).toBe(rev);
+      expect(funded.outputs[0].satoshis).toBe(2000);
+      expect(funded.outputs[1].satoshis).toBe(2000);
+      expect(funded.outputs[2].satoshis).toBe(1);
+      const saved = JSON.parse(readFileSync(join(root, "allowance.json"), "utf8"));
+      const inspected = inspectDescriptor(saved);
+      expect(inspected.ok).toBe(true);
+      if (inspected.ok) expect(inspected.totalSats).toBe(4000);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("sweepAllowance", () => {
+  test("owner branch OP_0 even when killfile is on", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      const vault = loadVault(root);
+      const agent = compressedPub();
+      const coin = vaultCoin(vault.address, 50_000);
+      const funded = await fundAllowance({
+        root,
+        agentPubHex: agent,
+        amount: 3000,
+        fetchUtxos: async () => [{ tx_hash: coin.txid, tx_pos: 0, value: coin.satoshis }],
+        fetchTxHex: async () => coin.hex,
+        broadcast: async (hex) => ({ txid: Transaction.fromHex(hex).id("hex") as string }),
+      });
+      expect(funded.ok).toBe(true);
+      if (!funded.ok) return;
+      killVault(root);
+      let sweepRaw = "";
+      const result = await sweepAllowance({
+        root,
+        fetchTxHex: async (txid) => {
+          if (txid === coin.txid) return coin.hex;
+          return funded.rawHex;
+        },
+        broadcast: async (hex) => {
+          sweepRaw = hex;
+          return { txid: Transaction.fromHex(hex).id("hex") as string };
+        },
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const sweep = Transaction.fromHex(sweepRaw);
+      expect(sweep.inputs[0].unlockingScript.toASM().endsWith("OP_0")).toBe(true);
+      expect(sweep.inputs[1].unlockingScript.toASM().endsWith("OP_0")).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

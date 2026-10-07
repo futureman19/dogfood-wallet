@@ -3,7 +3,7 @@ import { defaultFetchUtxos } from "./send";
 import { sendPayment, sweepPayment, splitPayment } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { settleX402 } from "./delegator";
-import { inspectDescriptor, lockingScriptHex, revocationScriptHex } from "./allowance";
+import { inspectDescriptor, lockingScriptHex, revocationScriptHex, fundAllowance, sweepAllowance } from "./allowance";
 import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault } from "./vault";
 import { readFileSync, existsSync } from "node:fs";
 
@@ -28,6 +28,8 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts x402-delegate <X402-Challenge-header> [method] [path] [--broadcast]
   bun src/cli.ts allowance-script <agent-pubkey-hex> <owner-pubkey-hex>
   bun src/cli.ts allowance-inspect <descriptor-json-or-file>
+  bun src/cli.ts allowance-fund <agent-pubkey-hex> <sats> [pieces]
+  bun src/cli.ts allowance-sweep [p2pkh-address]
   bun src/cli.ts mcp
   bun src/cli.ts mcp-http
 
@@ -187,6 +189,22 @@ async function main() {
       const result = inspectDescriptor(parsed);
       console.log(JSON.stringify(result, null, 2));
       if (!result.ok) process.exit(1);
+      break;
+    }
+    case "allowance-fund": {
+      if (!a || !b) die("Usage: allowance-fund <agent-pubkey-hex> <sats> [pieces]");
+      const amount = Number(b);
+      const pieces = rest[0] ? Number(rest[0]) : undefined;
+      const result = await fundAllowance({ root, agentPubHex: a, amount, pieces });
+      if (!result.ok) die(result.message);
+      console.log(JSON.stringify({ txid: result.txid, amount: result.amount, fee: result.fee, descriptor: result.descriptor }, null, 2));
+      break;
+    }
+    case "allowance-sweep": {
+      const result = await sweepAllowance({ root, to: a });
+      if (!result.ok) die(result.message);
+      console.log(`txid: ${result.txid}`);
+      console.log(`swept: ${result.amount} sats (fee ${result.fee})`);
       break;
     }
     case "mcp": {

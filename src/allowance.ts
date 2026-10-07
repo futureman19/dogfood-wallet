@@ -1,5 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
-import { LockingScript } from "@bsv/sdk";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { LockingScript, P2PKH, PrivateKey, Transaction, UnlockingScript } from "@bsv/sdk";
+import { evaluateAllowanceFund, evaluateSweep, estimateFee, MAX_SPLIT_OUTPUTS } from "./policy";
+import { defaultBroadcast, defaultFetchTxHex, defaultFetchUtxos, selectUtxos, type Utxo } from "./send";
+import { loadUsage, loadVault, vaultPaths } from "./vault";
 
 export const AGENT_ALLOWANCE_PROTOCOL_ID = [2, "agent allowance"] as const;
 
@@ -135,4 +140,208 @@ export function inspectDescriptor(raw: unknown): InspectOk | InspectFail {
     outputCount: d.outputs.length,
     revocationOutpoint: d.revocationOutpoint,
   };
+}
+
+function unlockChecksig(privateKey: PrivateKey, suffixAsm?: "OP_0" | "OP_1") {
+  return {
+    sign: async (tx: Transaction, inputIndex: number) => {
+      const inner = await new P2PKH().unlock(privateKey).sign(tx, inputIndex);
+      const sig = inner.toASM().split(/\s+/)[0];
+      return UnlockingScript.fromASM(suffixAsm ? `${sig} ${suffixAsm}` : sig);
+    },
+    estimateLength: async () => (suffixAsm ? 75 : 74),
+  };
+}
+
+export type FundResult =
+  | {
+      ok: true;
+      txid: string;
+      amount: number;
+      fee: number;
+      rawHex: string;
+      descriptor: Record<string, unknown>;
+    }
+  | { ok: false; code: string; message: string };
+
+export async function fundAllowance(opts: {
+  root: string;
+  agentPubHex: string;
+  amount: number;
+  pieces?: number;
+  purpose?: string;
+  fetchUtxos?: (address: string) => Promise<Utxo[]>;
+  fetchTxHex?: (txid: string) => Promise<string>;
+  broadcast?: (raw: string) => Promise<{ txid: string }>;
+}): Promise<FundResult> {
+  const vault = loadVault(opts.root);
+  const decision = evaluateAllowanceFund(vault.policy, opts.amount, loadUsage(opts.root));
+  if (!decision.ok) return decision;
+
+  let agentPub: string;
+  let ownerPub: string;
+  try {
+    agentPub = compressedPub(opts.agentPubHex);
+    ownerPub = compressedPub(vault.key.toPublicKey().toString());
+  } catch {
+    return { ok: false, code: "BAD_KEYS", message: "REJECTED: Agent pubkey must be compressed secp256k1 hex." };
+  }
+
+  const pieces = opts.pieces ?? 1;
+  if (!Number.isInteger(pieces) || pieces < 1 || pieces > MAX_SPLIT_OUTPUTS || opts.amount < pieces) {
+    return {
+      ok: false,
+      code: "BAD_AMOUNT",
+      message: `REJECTED: Pieces must be 1..${MAX_SPLIT_OUTPUTS} and each at least 1 sat.`,
+    };
+  }
+
+  const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
+  const need = opts.amount + 1;
+  const { chosen, fee, total } = selectUtxos(utxos, need);
+  const outCount = pieces + 2;
+  const actualFee = estimateFee(Math.max(chosen.length, 1), outCount);
+  if (chosen.length === 0 || total < need + actualFee) {
+    return {
+      ok: false,
+      code: "INSUFFICIENT",
+      message: `REJECTED: Insufficient funds (${total} sats available, need ${need + actualFee}).`,
+    };
+  }
+
+  const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
+  const tx = new Transaction();
+  for (const u of chosen) {
+    const hex = await fetchTxHex(u.tx_hash);
+    const source = Transaction.fromHex(hex);
+    tx.addInput({
+      sourceTransaction: source,
+      sourceTXID: u.tx_hash,
+      sourceOutputIndex: u.tx_pos,
+      unlockingScriptTemplate: new P2PKH().unlock(vault.key),
+    });
+  }
+
+  const lock = LockingScript.fromHex(lockingScriptHex(agentPub, ownerPub));
+  const base = Math.floor(opts.amount / pieces);
+  const rem = opts.amount - base * pieces;
+  for (let i = 0; i < pieces; i++) {
+    tx.addOutput({ satoshis: base + (i < rem ? 1 : 0), lockingScript: lock });
+  }
+  tx.addOutput({ satoshis: 1, lockingScript: LockingScript.fromHex(revocationScriptHex(ownerPub)) });
+  const change = total - opts.amount - 1 - actualFee;
+  if (change > 1) {
+    tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(vault.address) });
+  }
+  await tx.sign();
+  const rawHex = tx.toHex();
+  const { txid } = await (opts.broadcast ?? defaultBroadcast)(rawHex);
+
+  const outputs = Array.from({ length: pieces }, (_, i) => ({
+    outpoint: `${txid}.${i}`,
+    satoshis: base + (i < rem ? 1 : 0),
+  }));
+  const descriptor = {
+    version: "1.0",
+    allowanceId: generateAllowanceId(),
+    purpose: opts.purpose ?? "dogfood allowance",
+    ownerIdentityKey: ownerPub,
+    agentIdentityKey: agentPub,
+    protocolID: [...AGENT_ALLOWANCE_PROTOCOL_ID],
+    outputs,
+    revocationOutpoint: `${txid}.${pieces}`,
+  };
+  writeFileSync(join(opts.root, "allowance.json"), `${JSON.stringify(descriptor, null, 2)}\n`, { mode: 0o644 });
+  const paths = vaultPaths(opts.root);
+  appendFileSync(
+    paths.log,
+    `${JSON.stringify({
+      t: new Date().toISOString(),
+      txid,
+      amount: opts.amount,
+      fee: actualFee,
+      note: "allowance-fund",
+      kind: "allowance-fund",
+    })}\n`,
+  );
+  return { ok: true, txid, amount: opts.amount, fee: actualFee, rawHex, descriptor };
+}
+
+export async function sweepAllowance(opts: {
+  root: string;
+  to?: string;
+  fetchTxHex?: (txid: string) => Promise<string>;
+  broadcast?: (raw: string) => Promise<{ txid: string }>;
+}): Promise<FundResult> {
+  const vault = loadVault(opts.root);
+  const to = opts.to ?? vault.address;
+  const dest = evaluateSweep(vault.policy, to);
+  if (!dest.ok) return dest;
+  const path = join(opts.root, "allowance.json");
+  if (!existsSync(path)) {
+    return { ok: false, code: "NEED_ALLOWANCE", message: "REJECTED: No allowance.json. Fund one first." };
+  }
+  const descriptor = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  const inspected = inspectDescriptor(descriptor);
+  if (!inspected.ok) return inspected;
+
+  const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
+  const rec = descriptor as {
+    outputs: Array<{ outpoint: string; satoshis: number }>;
+    revocationOutpoint: string;
+  };
+  const points = [
+    ...rec.outputs.map((o) => ({ ...parseOutpoint(o.outpoint), satoshis: o.satoshis, kind: "allowance" as const })),
+    { ...parseOutpoint(rec.revocationOutpoint), satoshis: 1, kind: "revocation" as const },
+  ];
+  const total = points.reduce((s, p) => s + p.satoshis, 0);
+  const fee = estimateFee(points.length, 1);
+  if (total <= fee) {
+    return {
+      ok: false,
+      code: "INSUFFICIENT",
+      message: `REJECTED: Insufficient funds to sweep allowance (${total} sats, fee ${fee}).`,
+    };
+  }
+
+  const tx = new Transaction();
+  const hexCache = new Map<string, string>();
+  for (const p of points) {
+    let hex = hexCache.get(p.txid);
+    if (!hex) {
+      hex = await fetchTxHex(p.txid);
+      hexCache.set(p.txid, hex);
+    }
+    const source = Transaction.fromHex(hex);
+    tx.addInput({
+      sourceTransaction: source,
+      sourceTXID: p.txid,
+      sourceOutputIndex: p.vout,
+      unlockingScriptTemplate:
+        p.kind === "allowance" ? unlockChecksig(vault.key, "OP_0") : unlockChecksig(vault.key),
+    });
+  }
+  tx.addOutput({ satoshis: total - fee, lockingScript: new P2PKH().lock(to) });
+  await tx.sign();
+  const rawHex = tx.toHex();
+  const { txid } = await (opts.broadcast ?? defaultBroadcast)(rawHex);
+  const paths = vaultPaths(opts.root);
+  appendFileSync(
+    paths.log,
+    `${JSON.stringify({
+      t: new Date().toISOString(),
+      txid,
+      to,
+      amount: total - fee,
+      fee,
+      note: "allowance-sweep",
+      kind: "allowance-sweep",
+    })}\n`,
+  );
+  return { ok: true, txid, amount: total - fee, fee, rawHex, descriptor: rec };
+}
+
+function parseOutpoint(outpoint: string): { txid: string; vout: number } {
+  const [txid, v] = outpoint.split(".");
+  return { txid, vout: Number(v) };
 }

@@ -90,6 +90,49 @@ export function evaluateSweep(_policy: Policy, to: string): Decision {
   return { ok: true };
 }
 
+export function evaluateAllowanceFund(
+  policy: Policy,
+  amount: number,
+  usage: Usage = { spentToday: 0, spentLifetime: 0 },
+): Decision {
+  if (!Number.isInteger(amount) || amount <= 0 || !Number.isSafeInteger(amount)) {
+    return {
+      ok: false,
+      code: "BAD_AMOUNT",
+      message: `REJECTED: Amount must be a positive integer of satoshis (got ${String(amount)}).`,
+    };
+  }
+  if (policy.killfileOn) {
+    return {
+      ok: false,
+      code: "KILL",
+      message: "REJECTED: Killfile STOP_SPENDING is on. Human must delete it to resume.",
+    };
+  }
+  if (amount > policy.maxSatsPerTx) {
+    return {
+      ok: false,
+      code: "CAP",
+      message: `REJECTED: Exceeds cap of ${policy.maxSatsPerTx} sats/tx (requested ${amount}).`,
+    };
+  }
+  if (policy.maxSatsPerDay !== null && usage.spentToday + amount > policy.maxSatsPerDay) {
+    return {
+      ok: false,
+      code: "DAY",
+      message: `REJECTED: Exceeds daily cap of ${policy.maxSatsPerDay} sats (spent ${usage.spentToday}, requested ${amount}).`,
+    };
+  }
+  if (policy.maxSatsLifetime !== null && usage.spentLifetime + amount > policy.maxSatsLifetime) {
+    return {
+      ok: false,
+      code: "LIFETIME",
+      message: `REJECTED: Exceeds lifetime cap of ${policy.maxSatsLifetime} sats (spent ${usage.spentLifetime}, requested ${amount}).`,
+    };
+  }
+  return { ok: true };
+}
+
 export function utcDay(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
@@ -103,7 +146,7 @@ export function usageFromLog(lines: string[], now: Date = new Date()): Usage {
     if (!trimmed) continue;
     try {
       const row = JSON.parse(trimmed) as { t?: string; amount?: unknown; kind?: unknown };
-      if (row.kind === "sweep" || row.kind === "split") continue;
+      if (row.kind === "sweep" || row.kind === "split" || row.kind === "allowance-sweep") continue;
       const amount =
         typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
       spentLifetime += amount;

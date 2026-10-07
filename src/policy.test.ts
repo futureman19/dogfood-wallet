@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { evaluateSend, usageFromLog, evaluateSweep, evaluateSplit, planSplit, DEFAULT_MAX_SATS, MIN_SPLIT_PIECE, type Policy } from "./policy";
+import { evaluateSend, usageFromLog, evaluateSweep, evaluateSplit, evaluateAllowanceFund, planSplit, DEFAULT_MAX_SATS, MIN_SPLIT_PIECE, type Policy } from "./policy";
 
 const TO = "1GjcRUKdwqsnrxCHiDoHtF57rKqDd8oibT";
 const OTHER = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
@@ -144,11 +144,43 @@ describe("usageFromLog", () => {
         '{"t":"2026-10-07T02:00:00.000Z","amount":4990000,"kind":"sweep"}',
         '{"t":"2026-10-07T03:00:00.000Z","amount":0,"kind":"split"}',
         '{"t":"2026-10-07T04:00:00.000Z","amount":50}',
+        '{"t":"2026-10-07T05:00:00.000Z","amount":200,"kind":"allowance-fund"}',
+        '{"t":"2026-10-07T06:00:00.000Z","amount":200,"kind":"allowance-sweep"}',
       ],
       now,
     );
-    expect(usage.spentToday).toBe(150);
-    expect(usage.spentLifetime).toBe(150);
+    expect(usage.spentToday).toBe(350);
+    expect(usage.spentLifetime).toBe(350);
+  });
+});
+
+describe("evaluateAllowanceFund", () => {
+  test("allows a fund under the sat cap even with an empty allowlist", () => {
+    expect(evaluateAllowanceFund(base({ allowlist: [] }), 1000).ok).toBe(true);
+  });
+
+  test("rejects when killfile is on", () => {
+    const d = evaluateAllowanceFund(base({ killfileOn: true }), 100);
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("KILL");
+  });
+
+  test("rejects amount over the sat cap", () => {
+    const d = evaluateAllowanceFund(base({ maxSatsPerTx: 10_000 }), 10_001);
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("CAP");
+  });
+
+  test("rejects when daily cap would be exceeded", () => {
+    const d = evaluateAllowanceFund(base({ maxSatsPerDay: 5_000 }), 1_000, {
+      spentToday: 4_200,
+      spentLifetime: 4_200,
+    });
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("DAY");
   });
 });
 
