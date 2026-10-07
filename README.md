@@ -103,7 +103,7 @@ Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-25
 
 ## BRC-0204 (script + descriptor, not a live allowance)
 
-[BRC-0204](https://bsv.brc.dev/wallet/0204) is a two-branch lock: the agent spends with `OP_1`, the owner sweeps with `OP_0`, plus a 1-sat revocation output. Dogfood **funds and owner-sweeps** that shape. Locking keys are Type42-derived (`protocolID` `[2, "agent allowance"]`, `keyID` = `allowanceId`, counterparty = agent identity). The vault key is the owner **identity**, not the key on the lock. No BRC-52 certificate yet.
+[BRC-0204](https://bsv.brc.dev/wallet/0204) is a two-branch lock: the agent spends with `OP_1`, the owner sweeps with `OP_0`, plus a 1-sat revocation output. Dogfood **funds and owner-sweeps** that shape. Locking keys are Type42-derived (`protocolID` `[2, "agent allowance"]`, `keyID` = `allowanceId`, counterparty = agent identity). The vault key is the owner **identity**, not the key on the lock. Fund also issues a BRC-52 core certificate (type = SHA-256 of `agent allowance`) signed by the owner, bound to the revocation outpoint. Field revelation keyring stays on disk; it is not printed. Selective reveal to a payee is not implemented (needs the agent's key).
 
 ```bash
 bun src/cli.ts allowance-script <agent-pubkey-hex> <owner-pubkey-hex>
@@ -122,7 +122,7 @@ bun src/cli.ts allowance-sweep [p2pkh-address]
 ## Later
 
 - Live Merkle Works delegator URL (you set `DOGFOOD_X402_DELEGATOR_URL`; we do not start their gateway)
-- BRC-52 certificate on the allowance (issue + selective reveal)
+- BRC-52 selective reveal / proveCertificate for a payee (agent wallet)
 - BRC-181 signed PolicyRecord
 - PeerPay / BRC-100 funding from Yours
 

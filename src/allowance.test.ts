@@ -3,14 +3,16 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { KeyDeriver, LockingScript, P2PKH, PrivateKey, Transaction } from "@bsv/sdk";
+import { Certificate, KeyDeriver, LockingScript, P2PKH, PrivateKey, Transaction } from "@bsv/sdk";
 import {
   AGENT_ALLOWANCE_PROTOCOL_ID,
   certificateType,
   deriveAllowanceKeys,
   fundAllowance,
   generateAllowanceId,
+  inspectCertificate,
   inspectDescriptor,
+  issueAllowanceCertificate,
   lockingScriptHex,
   parseAllowanceLock,
   revocationScriptHex,
@@ -57,6 +59,62 @@ describe("BRC-0204 Type42 keys", () => {
       true,
     );
     expect(agentView.toString().toLowerCase()).toBe(keys.agentPubHex);
+  });
+});
+
+describe("BRC-52 allowance certificate", () => {
+  test("owner issues a signed cert bound to the revocation outpoint", async () => {
+    const owner = PrivateKey.fromRandom();
+    const agent = PrivateKey.fromRandom();
+    const id = generateAllowanceId();
+    const revocation = `${"ab".repeat(32)}.2`;
+    const issued = await issueAllowanceCertificate({
+      ownerRoot: owner,
+      agentIdentityPubHex: agent.toPublicKey().toString(),
+      allowanceId: id,
+      purpose: "Competitor research",
+      revocationOutpoint: revocation,
+    });
+    expect(issued.ok).toBe(true);
+    if (!issued.ok) return;
+    expect(issued.certificate.type).toBe(certificateType());
+    expect(issued.certificate.subject.toLowerCase()).toBe(agent.toPublicKey().toString().toLowerCase());
+    expect(issued.certificate.certifier.toLowerCase()).toBe(owner.toPublicKey().toString().toLowerCase());
+    expect(issued.certificate.revocationOutpoint).toBe(revocation);
+    expect(issued.certificate.fields.allowanceId).toBeDefined();
+    expect(issued.certificate.signature).toMatch(/^[0-9a-f]+$/i);
+    const sdk = Certificate.fromObject(issued.certificate);
+    expect(await sdk.verify()).toBe(true);
+    const check = await inspectCertificate(issued.certificate, {
+      ownerIdentityKey: owner.toPublicKey().toString(),
+      agentIdentityKey: agent.toPublicKey().toString(),
+      revocationOutpoint: revocation,
+    });
+    expect(check.ok).toBe(true);
+  });
+
+  test("inspect rejects a type that is not agent allowance", async () => {
+    const owner = PrivateKey.fromRandom();
+    const agent = PrivateKey.fromRandom();
+    const issued = await issueAllowanceCertificate({
+      ownerRoot: owner,
+      agentIdentityPubHex: agent.toPublicKey().toString(),
+      allowanceId: generateAllowanceId(),
+      purpose: "x",
+      revocationOutpoint: `${"cd".repeat(32)}.0`,
+    });
+    expect(issued.ok).toBe(true);
+    if (!issued.ok) return;
+    const check = await inspectCertificate(
+      { ...issued.certificate, type: Buffer.alloc(32, 7).toString("base64") },
+      {
+        ownerIdentityKey: owner.toPublicKey().toString(),
+        agentIdentityKey: agent.toPublicKey().toString(),
+        revocationOutpoint: issued.certificate.revocationOutpoint,
+      },
+    );
+    expect(check.ok).toBe(false);
+    if (!check.ok) expect(check.code).toBe("BAD_CERT");
   });
 });
 
@@ -242,6 +300,14 @@ describe("fundAllowance", () => {
         expect(inspected.ownerIdentityKey).toBe(vault.key.toPublicKey().toString().toLowerCase());
         expect(inspected.agentIdentityKey).toBe(agent.toLowerCase());
       }
+      expect(saved.certificate).toBeDefined();
+      const certCheck = await inspectCertificate(saved.certificate, {
+        ownerIdentityKey: vault.key.toPublicKey().toString(),
+        agentIdentityKey: agent,
+        revocationOutpoint: saved.revocationOutpoint,
+      });
+      expect(certCheck.ok).toBe(true);
+      expect(saved.masterKeyring).toBeDefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -197,7 +197,8 @@ async function main() {
       const pieces = rest[0] ? Number(rest[0]) : undefined;
       const result = await fundAllowance({ root, agentPubHex: a, amount, pieces });
       if (!result.ok) die(result.message);
-      console.log(JSON.stringify({ txid: result.txid, amount: result.amount, fee: result.fee, descriptor: result.descriptor }, null, 2));
+      const { masterKeyring: _omit, ...publicDescriptor } = result.descriptor as Record<string, unknown>;
+      console.log(JSON.stringify({ txid: result.txid, amount: result.amount, fee: result.fee, descriptor: publicDescriptor }, null, 2));
       break;
     }
     case "allowance-sweep": {

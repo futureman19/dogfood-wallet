@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { LockingScript, KeyDeriver, P2PKH, PrivateKey, Transaction, UnlockingScript } from "@bsv/sdk";
+import { Certificate, KeyDeriver, LockingScript, MasterCertificate, P2PKH, PrivateKey, ProtoWallet, Transaction, UnlockingScript } from "@bsv/sdk";
 import { evaluateAllowanceFund, evaluateSweep, estimateFee, MAX_SPLIT_OUTPUTS } from "./policy";
 import { defaultBroadcast, defaultFetchTxHex, defaultFetchUtxos, selectUtxos, type Utxo } from "./send";
 import { loadUsage, loadVault, vaultPaths } from "./vault";
@@ -44,6 +44,90 @@ export function deriveAllowanceKeys(ownerRoot: PrivateKey, agentIdentityPubHex: 
     agentPubHex: compressedPub(agentPub.toString()),
     ownerPriv,
   };
+}
+
+export type AllowanceCertificate = {
+  type: string;
+  serialNumber: string;
+  subject: string;
+  certifier: string;
+  revocationOutpoint: string;
+  fields: Record<string, string>;
+  signature: string;
+};
+
+function toCoreCertificate(cert: MasterCertificate): AllowanceCertificate {
+  if (!cert.signature) throw new Error("unsigned");
+  return {
+    type: cert.type,
+    serialNumber: cert.serialNumber,
+    subject: cert.subject,
+    certifier: cert.certifier,
+    revocationOutpoint: cert.revocationOutpoint,
+    fields: { ...cert.fields },
+    signature: cert.signature,
+  };
+}
+
+export async function issueAllowanceCertificate(opts: {
+  ownerRoot: PrivateKey;
+  agentIdentityPubHex: string;
+  allowanceId: string;
+  purpose: string;
+  revocationOutpoint: string;
+  expiresAt?: string;
+}): Promise<
+  | { ok: true; certificate: AllowanceCertificate; masterKeyring: Record<string, string> }
+  | InspectFail
+> {
+  try {
+    const subject = compressedPub(opts.agentIdentityPubHex);
+    const fields: Record<string, string> = {
+      allowanceId: opts.allowanceId,
+      purpose: opts.purpose,
+    };
+    if (opts.expiresAt) fields.expiresAt = opts.expiresAt;
+    const wallet = new ProtoWallet(opts.ownerRoot);
+    const issued = await MasterCertificate.issueCertificateForSubject(
+      wallet,
+      subject,
+      fields,
+      certificateType(),
+      async () => opts.revocationOutpoint,
+    );
+    return {
+      ok: true,
+      certificate: toCoreCertificate(issued),
+      masterKeyring: { ...issued.masterKeyring },
+    };
+  } catch {
+    return { ok: false, code: "BAD_CERT", message: "REJECTED: Could not issue BRC-52 allowance certificate." };
+  }
+}
+
+export async function inspectCertificate(
+  raw: AllowanceCertificate,
+  expected: { ownerIdentityKey: string; agentIdentityKey: string; revocationOutpoint: string },
+): Promise<{ ok: true } | InspectFail> {
+  if (raw.type !== certificateType()) {
+    return { ok: false, code: "BAD_CERT", message: "REJECTED: Certificate type is not agent allowance." };
+  }
+  if (raw.subject.toLowerCase() !== compressedPub(expected.agentIdentityKey)) {
+    return { ok: false, code: "BAD_CERT", message: "REJECTED: Certificate subject is not the agent identity." };
+  }
+  if (raw.certifier.toLowerCase() !== compressedPub(expected.ownerIdentityKey)) {
+    return { ok: false, code: "BAD_CERT", message: "REJECTED: Certificate certifier is not the owner identity." };
+  }
+  if (raw.revocationOutpoint !== expected.revocationOutpoint) {
+    return { ok: false, code: "BAD_CERT", message: "REJECTED: Certificate revocationOutpoint does not match." };
+  }
+  try {
+    const ok = await Certificate.fromObject(raw).verify();
+    if (!ok) return { ok: false, code: "BAD_CERT", message: "REJECTED: Certificate signature is invalid." };
+    return { ok: true };
+  } catch {
+    return { ok: false, code: "BAD_CERT", message: "REJECTED: Certificate signature is invalid." };
+  }
 }
 
 function compressedPub(hex: string): string {
@@ -252,7 +336,17 @@ export async function fundAllowance(opts: {
   }
   await tx.sign();
   const rawHex = tx.toHex();
-  const { txid } = await (opts.broadcast ?? defaultBroadcast)(rawHex);
+  const txid = tx.id("hex") as string;
+  const revocationOutpoint = `${txid}.${pieces}`;
+  const issued = await issueAllowanceCertificate({
+    ownerRoot: vault.key,
+    agentIdentityPubHex: agentIdentity,
+    allowanceId,
+    purpose: opts.purpose ?? "dogfood allowance",
+    revocationOutpoint,
+  });
+  if (!issued.ok) return issued;
+  await (opts.broadcast ?? defaultBroadcast)(rawHex);
 
   const outputs = Array.from({ length: pieces }, (_, i) => ({
     outpoint: `${txid}.${i}`,
@@ -266,7 +360,9 @@ export async function fundAllowance(opts: {
     agentIdentityKey: agentIdentity,
     protocolID: [...AGENT_ALLOWANCE_PROTOCOL_ID],
     outputs,
-    revocationOutpoint: `${txid}.${pieces}`,
+    revocationOutpoint,
+    certificate: issued.certificate,
+    masterKeyring: issued.masterKeyring,
   };
   writeFileSync(join(opts.root, "allowance.json"), `${JSON.stringify(descriptor, null, 2)}\n`, { mode: 0o644 });
   const paths = vaultPaths(opts.root);
