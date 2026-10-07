@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { P2PKH, PublicKey, Signature } from "@bsv/sdk";
 
 export const POLICY_TYPE = "brc-181/agent-policy/1";
@@ -144,7 +145,8 @@ export type PolicyEnvelope = {
 
 export function gateAgentSend(opts: {
   envelope: PolicyEnvelope | null | undefined;
-  to: string;
+  to?: string;
+  lockingScriptHex?: string;
   amount: number;
   fee: number;
   spentTotal: number;
@@ -153,11 +155,14 @@ export function gateAgentSend(opts: {
   if (!opts.envelope) return { ok: true };
   const verified = verifyPolicyEnvelope(opts.envelope);
   if (!verified.ok) return verified;
-  let lockingScriptHex: string;
-  try {
-    lockingScriptHex = new P2PKH().lock(opts.to).toHex();
-  } catch {
-    return { ok: false, code: "BAD_ADDRESS", message: "REJECTED: Destination is not a P2PKH address." };
+  let lockingScriptHex = opts.lockingScriptHex;
+  if (!lockingScriptHex) {
+    if (!opts.to) return { ok: false, code: "BAD_ADDRESS", message: "REJECTED: Destination is missing." };
+    try {
+      lockingScriptHex = new P2PKH().lock(opts.to).toHex();
+    } catch {
+      return { ok: false, code: "BAD_ADDRESS", message: "REJECTED: Destination is not a P2PKH address." };
+    }
   }
   const origin =
     opts.origin ?? process.env.DOGFOOD_ORIGIN_TOKEN ?? String(opts.envelope.payload.origin_token ?? "");
@@ -172,4 +177,19 @@ export function gateAgentSend(opts: {
     return { ok: false, code: "POLICY", message: `REJECTED: BRC-181 ${verdict.reason ?? "denied"}.` };
   }
   return { ok: true };
+}
+
+export function loadPolicyEnvelope(
+  path: string,
+): { ok: true; envelope: PolicyEnvelope | null } | { ok: false; code: string; message: string } {
+  if (!existsSync(path)) return { ok: true, envelope: null };
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as PolicyEnvelope;
+    if (!parsed?.payload || !parsed?.sig) {
+      return { ok: false, code: "BAD_SIG", message: "REJECTED: brc181.json needs payload and sig." };
+    }
+    return { ok: true, envelope: parsed };
+  } catch {
+    return { ok: false, code: "BAD_SIG", message: "REJECTED: brc181.json is not valid JSON." };
+  }
 }

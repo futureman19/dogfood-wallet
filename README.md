@@ -127,13 +127,12 @@ bun src/cli.ts policy-inspect <envelope-json-or-file>
 
 Verifies a signed `brc-181/agent-policy/1` envelope against frozen vectors (`testdata/brc-181-vectors.json`). Canonical dest is `p2pkh:<hash160>` or `script:<sha256>`; OP_RETURN is not a dest. Human-only inspect. Not MCP.
 
-If the vault contains `brc181.json`, **`send` also verifies the envelope and enforces it** (AND with local `policy.json`). Origin is `DOGFOOD_ORIGIN_TOKEN` or the record's `origin_token`. Sweep/split ignore the envelope. A Vector A `max_fee` of 100 sats will reject a typical P2PKH fee — issue a record with a real fee cap.
+If the vault contains `brc181.json`, **`send` and `x402-delegate` also verify the envelope and enforce it** (AND with local `policy.json`). Origin is `DOGFOOD_ORIGIN_TOKEN` or the record's `origin_token`. Sweep/split ignore the envelope. A Vector A `max_fee` of 100 sats will reject a typical P2PKH fee — issue a record with a real fee cap. x402-delegate treats merchant fee as 0 (Dogfood does not spend local coins on the nonce UTXO).
 
 ## Later
 
 - Live Merkle Works delegator URL (you set `DOGFOOD_X402_DELEGATOR_URL`; we do not start their gateway)
 - BRC-52 selective reveal / proveCertificate for a payee (agent wallet)
-- Gate x402-delegate with the same BRC-181 envelope
 - PeerPay / BRC-100 funding from Yours
 
 ## Dev

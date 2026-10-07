@@ -1,6 +1,7 @@
 import { challengeSha256, decideX402, encodeProofHeader, buildProof, inspectProof, type X402Challenge, type X402Proof } from "./x402";
 import type { Policy, Usage } from "./policy";
 import { defaultBroadcast } from "./send";
+import { gateAgentSend, type PolicyEnvelope } from "./brc181";
 
 export const DEFAULT_DELEGATOR_PATH = "/delegate/x402";
 
@@ -159,11 +160,22 @@ export async function settleX402(opts: {
   query?: string;
   broadcast?: boolean;
   broadcastFn?: (raw: string) => Promise<{ txid: string }>;
+  envelope?: PolicyEnvelope | null;
+  origin?: string;
 }): Promise<SettleX402Result> {
   const decided = decideX402(opts.policy, opts.usage, opts.challenge);
   if (!decided.ok) {
     return { ok: false, broadcast: false, code: decided.code ?? "POLICY", message: decided.message };
   }
+  const brc = gateAgentSend({
+    envelope: opts.envelope,
+    lockingScriptHex: opts.challenge.payee_locking_script_hex,
+    amount: opts.challenge.amount_sats,
+    fee: 0,
+    spentTotal: opts.usage.spentLifetime,
+    origin: opts.origin,
+  });
+  if (!brc.ok) return { ok: false, broadcast: false, code: brc.code, message: brc.message };
   const url = opts.delegatorUrl ?? process.env.DOGFOOD_X402_DELEGATOR_URL;
   if (!url) {
     return {

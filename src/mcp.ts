@@ -5,7 +5,8 @@ import { z } from "zod";
 import { defaultFetchUtxos, sendPayment } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { settleX402 } from "./delegator";
-import { defaultVaultDir, killVault, loadUsage, loadVault, statusVault } from "./vault";
+import { defaultVaultDir, killVault, loadUsage, loadVault, statusVault, vaultPaths } from "./vault";
+import { loadPolicyEnvelope } from "./brc181";
 
 function text(obj: unknown, isError = false) {
   return {
@@ -133,6 +134,8 @@ export function createServer(root: string) {
     async ({ challenge, method, path, broadcast }) => {
       const vault = loadVault(root);
       const decoded = decodeChallengeHeader(challenge);
+      const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
+      if (!loaded.ok) return text(loaded, true);
       const result = await settleX402({
         policy: vault.policy,
         usage: loadUsage(root),
@@ -140,6 +143,7 @@ export function createServer(root: string) {
         method,
         path,
         broadcast,
+        envelope: loaded.envelope,
       });
       return text(result, !result.ok);
     },

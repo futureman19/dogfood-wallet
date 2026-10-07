@@ -1,8 +1,8 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { P2PKH, Transaction } from "@bsv/sdk";
 import { evaluateSend, evaluateSweep, evaluateSplit, planSplit, DEFAULT_SPLIT_PIECE } from "./policy";
 import { loadUsage, loadVault, vaultPaths } from "./vault";
-import { gateAgentSend, type PolicyEnvelope } from "./brc181";
+import { gateAgentSend, loadPolicyEnvelope } from "./brc181";
 
 export type Utxo = { tx_hash: string; tx_pos: number; value: number };
 
@@ -56,20 +56,6 @@ export function selectUtxos(utxos: Utxo[], amount: number): { chosen: Utxo[]; fe
   return { chosen, fee: feeFor(Math.max(chosen.length, 1), 2), total };
 }
 
-function loadEnvelope(root: string): { ok: true; envelope: PolicyEnvelope | null } | { ok: false; code: string; message: string } {
-  const path = vaultPaths(root).brc181;
-  if (!existsSync(path)) return { ok: true, envelope: null };
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as PolicyEnvelope;
-    if (!parsed?.payload || !parsed?.sig) {
-      return { ok: false, code: "BAD_SIG", message: "REJECTED: brc181.json needs payload and sig." };
-    }
-    return { ok: true, envelope: parsed };
-  } catch {
-    return { ok: false, code: "BAD_SIG", message: "REJECTED: brc181.json is not valid JSON." };
-  }
-}
-
 export async function sendPayment(opts: {
   root: string;
   to: string;
@@ -85,14 +71,14 @@ export async function sendPayment(opts: {
   const decision = evaluateSend(vault.policy, opts.amount, opts.to, usage);
   if (!decision.ok) return decision;
 
-  const loaded = loadEnvelope(opts.root);
+  const loaded = loadPolicyEnvelope(vaultPaths(opts.root).brc181);
   if (!loaded.ok) return loaded;
   const pre = gateAgentSend({
     envelope: loaded.envelope,
     to: opts.to,
     amount: opts.amount,
     fee: 0,
-    spentTotal: usage.lifetime,
+    spentTotal: usage.spentLifetime,
     origin: opts.origin,
   });
   if (!pre.ok) return pre;
@@ -111,7 +97,7 @@ export async function sendPayment(opts: {
     to: opts.to,
     amount: opts.amount,
     fee,
-    spentTotal: usage.lifetime,
+    spentTotal: usage.spentLifetime,
     origin: opts.origin,
   });
   if (!post.ok) return post;

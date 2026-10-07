@@ -4,8 +4,8 @@ import { sendPayment, sweepPayment, splitPayment } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { settleX402 } from "./delegator";
 import { inspectDescriptor, lockingScriptHex, revocationScriptHex, fundAllowance, sweepAllowance } from "./allowance";
-import { verifyPolicyEnvelope } from "./brc181";
-import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault } from "./vault";
+import { verifyPolicyEnvelope, loadPolicyEnvelope } from "./brc181";
+import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault, vaultPaths } from "./vault";
 import { readFileSync, existsSync } from "node:fs";
 
 function die(msg: string, code = 1): never {
@@ -156,6 +156,8 @@ async function main() {
       const extra = [b, ...rest].filter((x): x is string => Boolean(x));
       const wantBroadcast = extra.includes("--broadcast");
       const positional = extra.filter((x) => x !== "--broadcast");
+      const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
+      if (!loaded.ok) die(loaded.message);
       const result = await settleX402({
         policy: vault.policy,
         usage: loadUsage(root),
@@ -163,6 +165,7 @@ async function main() {
         method: positional[0] || challenge.method,
         path: positional[1] || challenge.path,
         broadcast: wantBroadcast ? true : undefined,
+        envelope: loaded.envelope,
       });
       console.log(JSON.stringify(result, null, 2));
       if (!result.ok) process.exit(1);

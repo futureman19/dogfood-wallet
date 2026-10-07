@@ -310,4 +310,68 @@ describe("settleX402", () => {
     expect(r.code).toBe("BROADCAST");
     expect(r.broadcast).toBe(false);
   });
+
+  test("does not call the delegator when BRC-181 dest is off-allowlist", async () => {
+    const vectors181 = JSON.parse(
+      readFileSync(join(import.meta.dir, "..", "testdata", "brc-181-vectors.json"), "utf8"),
+    );
+    const envelope = {
+      payload: JSON.parse(vectors181.vectorA.canonical),
+      sig: {
+        alg: "ECDSA-SHA256-secp256k1",
+        issuer: vectors181.vectorA.issuer,
+        signature: vectors181.vectorA.signature,
+      },
+    };
+    let hits = 0;
+    const fetchFn = async () => {
+      hits += 1;
+      return new Response("no", { status: 500 });
+    };
+    const r = await settleX402({
+      policy,
+      usage: ZERO_USAGE,
+      challenge: ch,
+      delegatorUrl: "http://delegator.example",
+      fetchFn,
+      envelope,
+      origin: "agt-marketplace-bidder-01",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe("POLICY");
+    expect(hits).toBe(0);
+  });
+
+  test("does not call the delegator when BRC-181 per-tx cap would fail", async () => {
+    const vectors181 = JSON.parse(
+      readFileSync(join(import.meta.dir, "..", "testdata", "brc-181-vectors.json"), "utf8"),
+    );
+    const envelope = {
+      payload: JSON.parse(vectors181.vectorA.canonical),
+      sig: {
+        alg: "ECDSA-SHA256-secp256k1",
+        issuer: vectors181.vectorA.issuer,
+        signature: vectors181.vectorA.signature,
+      },
+    };
+    const vectorLock = "76a914" + "11".repeat(20) + "88ac";
+    const vectorPayee = p2pkhAddressFromLock(vectorLock)!;
+    let hits = 0;
+    const fetchFn = async () => {
+      hits += 1;
+      return new Response("no", { status: 500 });
+    };
+    const r = await settleX402({
+      policy: { ...policy, allowlist: [vectorPayee] },
+      usage: ZERO_USAGE,
+      challenge: { ...ch, amount_sats: 101, payee_locking_script_hex: vectorLock },
+      delegatorUrl: "http://delegator.example",
+      fetchFn,
+      envelope,
+      origin: "agt-marketplace-bidder-01",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe("POLICY");
+    expect(hits).toBe(0);
+  });
 });

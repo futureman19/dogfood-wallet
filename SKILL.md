@@ -31,7 +31,7 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 4. Human-only mutations (`allow`, `sweep`, `split`, `allowance-script`, `allowance-inspect`, `allowance-fund`, `allowance-sweep`, `policy-inspect`, deleting `STOP_SPENDING`) stay off MCP. Agents get `address` / `balance` / `status` / `send` / `kill` / `x402_inspect` / `x402_proof` / `x402_delegate`. Sweep bypasses caps/allowlist/killfile so the owner can reclaim funds. Split is self-send pocket change (killfile still applies; does not eat spend caps).
 5. x402: inspect + proof + delegator client. `x402-delegate` / `x402_delegate` POST `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402`. Unset URL → NEED_DELEGATOR, no fetch, no demo host. Broadcast is off unless `--broadcast` / `broadcast: true` / `DOGFOOD_X402_BROADCAST=1` (ARC, same as send). Coin selection is smallest-first so split pocket-change is actually used.
 6. BRC-0204: script + descriptor + fund/sweep + BRC-52 issue. Locking keys are Type42 (`[2, "agent allowance"]`, keyID = allowanceId). Vault key is owner identity. Fund issues a signed BRC-52 core cert bound to the revocation outpoint. masterKeyring stays on disk, not printed, not MCP. No proveCertificate / selective reveal yet.
-7. BRC-181: inspect/verify a signed PolicyRecord (`src/brc181.ts`) against `testdata/brc-181-vectors.json`. If vault `brc181.json` exists, `sendPayment` ANDs it with local `policy.json` (`gateAgentSend`). Origin: `DOGFOOD_ORIGIN_TOKEN` or the record. Sweep/split skip it. Not concurrent ledger. Not MCP install.
+7. BRC-181: inspect/verify a signed PolicyRecord (`src/brc181.ts`) against `testdata/brc-181-vectors.json`. If vault `brc181.json` exists, `sendPayment` and `settleX402` AND it with local `policy.json` (`gateAgentSend`). Origin: `DOGFOOD_ORIGIN_TOKEN` or the record. Sweep/split skip it. x402 fee is 0 (no local nonce spend). Not concurrent ledger. Not MCP install.
 8. `bun test`, commit, `git push origin main`.
 
 ## Product rules
@@ -47,7 +47,6 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 
 1. Point `DOGFOOD_X402_DELEGATOR_URL` at a live Merkle Works `make demo` (client + opt-in broadcast are shipped; we do not start their gateway)
 2. BRC-52 selective reveal / proveCertificate for a payee (needs the agent key)
-3. Gate x402-delegate with the same BRC-181 envelope
 
 ## Pitfalls
 
