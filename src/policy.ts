@@ -27,6 +27,58 @@ export function isValidAddress(address: string): boolean {
   return P2PKH.test(address);
 }
 
+export const MIN_SPLIT_PIECE = 1_000;
+export const MAX_SPLIT_OUTPUTS = 20;
+export const DEFAULT_SPLIT_PIECE = DEFAULT_MAX_SATS;
+
+export function estimateFee(inputs: number, outputs: number): number {
+  return 10 + Math.max(inputs, 1) * 148 + Math.max(outputs, 1) * 34;
+}
+
+export function evaluateSplit(policy: Policy, pieceSats: number): Decision {
+  if (policy.killfileOn) {
+    return {
+      ok: false,
+      code: "KILL",
+      message: "REJECTED: Killfile STOP_SPENDING is on. Human must delete it to resume.",
+    };
+  }
+  if (!Number.isInteger(pieceSats) || pieceSats < MIN_SPLIT_PIECE || !Number.isSafeInteger(pieceSats)) {
+    return {
+      ok: false,
+      code: "BAD_AMOUNT",
+      message: `REJECTED: Split piece must be an integer of at least ${MIN_SPLIT_PIECE} sats (got ${String(pieceSats)}).`,
+    };
+  }
+  return { ok: true };
+}
+
+export type SplitPlan =
+  | { ok: true; pieces: number[]; fee: number }
+  | { ok: false; code: "INSUFFICIENT"; message: string };
+
+export function planSplit(total: number, pieceSats: number, inputs: number): SplitPlan {
+  let n = Math.min(MAX_SPLIT_OUTPUTS, Math.max(2, Math.floor(total / Math.max(pieceSats, MIN_SPLIT_PIECE))));
+  while (n >= 2) {
+    const fee = estimateFee(inputs, n);
+    const spendable = total - fee;
+    if (spendable >= n * MIN_SPLIT_PIECE) {
+      const base = Math.floor(spendable / n);
+      if (base >= MIN_SPLIT_PIECE) {
+        const rem = spendable - base * n;
+        const pieces = Array.from({ length: n }, (_, i) => base + (i < rem ? 1 : 0));
+        return { ok: true, pieces, fee };
+      }
+    }
+    n -= 1;
+  }
+  return {
+    ok: false,
+    code: "INSUFFICIENT",
+    message: `REJECTED: Insufficient funds to split into pocket change (${total} sats).`,
+  };
+}
+
 export function evaluateSweep(_policy: Policy, to: string): Decision {
   if (!isValidAddress(to)) {
     return {
@@ -50,7 +102,8 @@ export function usageFromLog(lines: string[], now: Date = new Date()): Usage {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
-      const row = JSON.parse(trimmed) as { t?: string; amount?: unknown };
+      const row = JSON.parse(trimmed) as { t?: string; amount?: unknown; kind?: unknown };
+      if (row.kind === "sweep" || row.kind === "split") continue;
       const amount =
         typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
       spentLifetime += amount;

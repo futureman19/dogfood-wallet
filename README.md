@@ -33,9 +33,10 @@ bun src/cli.ts allow <p2pkh-address>
 bun src/cli.ts send <p2pkh-address> <sats> [note]
 bun src/cli.ts kill
 bun src/cli.ts sweep <p2pkh-address>
+bun src/cli.ts split [piece-sats]
 ```
 
-`allow` and `sweep` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. `kill` writes `STOP_SPENDING`. A **human** deletes that file to resume agent sends. Agents must not.
+`allow`, `sweep`, and `split` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. Split turns one fat UTXO into up to 20 even self-outputs (default piece 10k sats, min 1k) so later agent sends are not serialized on a single coin. Split does **not** count against daily/lifetime caps. `kill` writes `STOP_SPENDING`. A **human** deletes that file to resume agent sends. Agents must not.
 
 ## MCP
 
@@ -100,7 +101,6 @@ Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-25
 
 - BRC-181 wallet-enforced policy
 - BRC-0204 on-chain allowance the owner can sweep
-- UTXO pocket-change for concurrent 402s
 - PeerPay / BRC-100 funding from Yours
 
 ## Dev

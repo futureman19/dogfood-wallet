@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initVault, killVault, allowDestination } from "./vault";
-import { sendPayment, sweepPayment } from "./send";
+import { sendPayment, sweepPayment, splitPayment } from "./send";
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "dogfood-send-"));
@@ -145,6 +145,46 @@ describe("sweepPayment", () => {
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.code).toBe("BAD_ADDRESS");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("splitPayment", () => {
+  test("does not fetch UTXOs when killfile is on", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      killVault(root);
+      let fetched = false;
+      const result = await splitPayment({
+        root,
+        fetchUtxos: async () => {
+          fetched = true;
+          return [];
+        },
+      });
+      expect(fetched).toBe(false);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("KILL");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("returns INSUFFICIENT on an empty vault", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      const result = await splitPayment({
+        root,
+        fetchUtxos: async () => [],
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("INSUFFICIENT");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

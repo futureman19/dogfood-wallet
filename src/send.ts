@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { P2PKH, Transaction } from "@bsv/sdk";
-import { evaluateSend, evaluateSweep } from "./policy";
+import { evaluateSend, evaluateSweep, evaluateSplit, planSplit, DEFAULT_SPLIT_PIECE } from "./policy";
 import { loadUsage, loadVault, vaultPaths } from "./vault";
 
 export type Utxo = { tx_hash: string; tx_pos: number; value: number };
@@ -166,4 +166,56 @@ export async function sweepPayment(opts: {
     })}\n`,
   );
   return { ok: true, txid, amount, to: opts.to, fee };
+}
+
+export async function splitPayment(opts: {
+  root: string;
+  pieceSats?: number;
+  fetchUtxos?: (address: string) => Promise<Utxo[]>;
+  fetchTxHex?: (txid: string) => Promise<string>;
+  broadcast?: (raw: string) => Promise<{ txid: string }>;
+}): Promise<SendResult & { pieces?: number[] }> {
+  const vault = loadVault(opts.root);
+  const pieceSats = opts.pieceSats ?? DEFAULT_SPLIT_PIECE;
+  const decision = evaluateSplit(vault.policy, pieceSats);
+  if (!decision.ok) return decision;
+
+  const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
+  const total = utxos.reduce((s, u) => s + u.value, 0);
+  const plan = planSplit(total, pieceSats, Math.max(utxos.length, 1));
+  if (!plan.ok) return plan;
+
+  const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
+  const tx = new Transaction();
+  for (const u of utxos) {
+    const hex = await fetchTxHex(u.tx_hash);
+    const source = Transaction.fromHex(hex);
+    tx.addInput({
+      sourceTransaction: source,
+      sourceTXID: u.tx_hash,
+      sourceOutputIndex: u.tx_pos,
+      unlockingScriptTemplate: new P2PKH().unlock(vault.key),
+    });
+  }
+  for (const satoshis of plan.pieces) {
+    tx.addOutput({ satoshis, lockingScript: new P2PKH().lock(vault.address) });
+  }
+  await tx.sign();
+  const raw = tx.toHex();
+  const { txid } = await (opts.broadcast ?? defaultBroadcast)(raw);
+  const paths = vaultPaths(opts.root);
+  appendFileSync(
+    paths.log,
+    `${JSON.stringify({
+      t: new Date().toISOString(),
+      txid,
+      to: vault.address,
+      amount: 0,
+      fee: plan.fee,
+      pieces: plan.pieces.length,
+      note: "split",
+      kind: "split",
+    })}\n`,
+  );
+  return { ok: true, txid, amount: 0, to: vault.address, fee: plan.fee, pieces: plan.pieces };
 }

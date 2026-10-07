@@ -17,7 +17,7 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 - Repo: `C:/Users/futur/Desktop/dogfood-wallet`
 - GitHub: https://github.com/futureman19/dogfood-wallet (public, MIT)
 - Vault dir: `~/.dogfood-wallet` (`DOGFOOD_WALLET_DIR` override)
-- CLI: `bun src/cli.ts` (`init` / `address` / `balance` / `status` / `allow` / `send` / `kill` / `sweep` / `x402-inspect` / `mcp` / `mcp-http`)
+- CLI: `bun src/cli.ts` (`init` / `address` / `balance` / `status` / `allow` / `send` / `kill` / `sweep` / `split` / `x402-inspect` / `mcp` / `mcp-http`)
 - Tests: `bun test` from the repo root before commit. Push `main` after green.
 - x402 vectors: `testdata/x402-vectors-v1.json` (Merkle Works v1 frozen). Codec lives in `src/x402.ts`.
 
@@ -28,7 +28,7 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 1. `git status --short` in `Desktop/dogfood-wallet` only.
 2. TDD on policy/send/vault: write the failing test, run `bun test`, then the minimum signer change.
 3. Policy lives in `src/policy.ts` (`evaluateSend` + `usageFromLog`). Wire usage from `spends.jsonl` in `sendPayment` — do not re-check caps only in the CLI.
-4. Human-only mutations (`allow`, `sweep`, deleting `STOP_SPENDING`) stay off MCP. Agents get `address` / `balance` / `status` / `send` / `kill` / `x402_inspect` only. Sweep bypasses caps/allowlist/killfile so the owner can reclaim funds.
+4. Human-only mutations (`allow`, `sweep`, `split`, deleting `STOP_SPENDING`) stay off MCP. Agents get `address` / `balance` / `status` / `send` / `kill` / `x402_inspect` only. Sweep bypasses caps/allowlist/killfile so the owner can reclaim funds. Split is self-send pocket change (killfile still applies; does not eat spend caps).
 5. x402 work is **payer inspect** until settlement is explicitly in scope: decode `X402-Challenge`, map P2PKH payee, run `evaluateSend`. Do not broadcast a 402 payment and do not spend the merchant nonce UTXO without their delegator.
 6. `bun test`, commit, `git push origin main`.
 
@@ -44,7 +44,6 @@ Local BSV agent vault: LLM requests payment; a signer on disk authorizes it.
 ## Next slices (user picks)
 
 1. x402 **settlement** via a live Merkle Works delegator (inspect + vector codec shipped; nonce UTXO is theirs)
-2. UTXO pocket-change for concurrent 402s
 
 ## Pitfalls
 
