@@ -9,6 +9,9 @@ import {
   inspectChallenge,
   p2pkhAddressFromLock,
   toBase64Url,
+  headerBindingSha256,
+  bodySha256FromHex,
+  txidFromRawHex,
 } from "./x402";
 import { evaluateSend } from "./policy";
 import { DEFAULT_MAX_SATS } from "./policy";
@@ -23,6 +26,12 @@ const vectors = JSON.parse(
     canonical_challenge_json?: string;
     challenge_sha256?: string;
     challenge_base64url?: string;
+    header_binding_string?: string;
+    headers_sha256?: string;
+    body_sha256?: string;
+    body_bytes?: string;
+    rawtx_hex?: string;
+    txid?: string;
   }>;
 };
 
@@ -54,6 +63,34 @@ describe("x402 codec vs merkleworks vectors", () => {
     expect(d.ok).toBe(false);
     if (d.ok) return;
     expect(d.code).toBe("EXPIRED");
+  });
+
+  test("canonical JSON and hash match valid_post_with_body", () => {
+    const v = byName("valid_post_with_body");
+    expect(canonicalJson(v.challenge)).toBe(v.canonical_challenge_json);
+    expect(challengeSha256(v.challenge!)).toBe(v.challenge_sha256);
+    expect(toBase64Url(v.canonical_challenge_json!)).toBe(v.challenge_base64url);
+  });
+
+  test("header binding hash matches frozen vector", () => {
+    const v = byName("header_binding_canonical");
+    expect(headerBindingSha256(v.header_binding_string!)).toBe(v.headers_sha256);
+  });
+
+  test("body hash matches frozen vector", () => {
+    const v = byName("body_hash_examples");
+    expect(bodySha256FromHex(v.body_bytes!)).toBe(v.body_sha256);
+    expect(bodySha256FromHex("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  });
+
+  test("txid is double-SHA256 byte-reversed", () => {
+    const v = byName("txid_derivation");
+    expect(txidFromRawHex(v.rawtx_hex!)).toBe(v.txid);
+  });
+
+  test("invalid_txid_mismatch is detected", () => {
+    const v = byName("invalid_txid_mismatch");
+    expect(txidFromRawHex(v.rawtx_hex!)).not.toBe(v.txid);
   });
 });
 

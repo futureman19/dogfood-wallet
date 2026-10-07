@@ -60,8 +60,26 @@ export function toBase64Url(text: string): string {
   return Buffer.from(text, "utf8").toString("base64url");
 }
 
+export function sha256Hex(buf: Buffer): string {
+  return sha256(buf).toString("hex");
+}
+
 export function challengeSha256(challenge: unknown): string {
-  return sha256(Buffer.from(canonicalJson(challenge), "utf8")).toString("hex");
+  return sha256Hex(Buffer.from(canonicalJson(challenge), "utf8"));
+}
+
+export function headerBindingSha256(bindingString: string): string {
+  return sha256Hex(Buffer.from(bindingString, "utf8"));
+}
+
+export function bodySha256FromHex(bodyBytesHex: string): string {
+  return sha256Hex(Buffer.from(bodyBytesHex, "hex"));
+}
+
+export function txidFromRawHex(rawtxHex: string): string {
+  const raw = Buffer.from(rawtxHex, "hex");
+  const d = sha256(sha256(raw));
+  return Buffer.from(d).reverse().toString("hex");
 }
 
 export function decodeChallengeHeader(header: string): X402Challenge {

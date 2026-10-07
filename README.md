@@ -86,7 +86,7 @@ The signer fails closed. The agent should pivot (cheaper source, stop), not retr
 bun src/cli.ts x402-inspect <X402-Challenge>
 ```
 
-Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-256, base64url).
+Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-256, base64url, header binding, body hash, Bitcoin txid).
 
 ## Later
 
