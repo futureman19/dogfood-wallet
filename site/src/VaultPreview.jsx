@@ -1,14 +1,13 @@
 import { useRef, useState } from "react";
+import FlowSteps from "./FlowSteps";
 import {
   ArrowUpRight,
-  Bot,
   ChevronRight,
   LockKeyhole,
   Power,
   RotateCcw,
   ShieldCheck,
   Terminal,
-  Wallet,
 } from "lucide-react";
 import {
   MAX_BUDGET,
@@ -22,12 +21,6 @@ import {
 } from "./bowlDemo";
 
 const README = "https://github.com/futureman19/dogfood-wallet#readme";
-const flow = [
-  { title: "User Wallet", sub: "Funding", Icon: Wallet },
-  { title: "Local Vault", sub: "Signer Daemon", Icon: LockKeyhole },
-  { title: "Digital Bowl", sub: "MCP Server Wallet", Icon: ShieldCheck },
-  { title: "AI Agents", sub: "MCP clients", Icon: Bot },
-];
 
 function BowlDial({ budget, onChange }) {
   const drag = useRef(null);
@@ -163,27 +156,7 @@ export default function VaultPreview() {
         <span className="status-dot" /> TRY THE LOCAL VAULT{" "}
         <span>BROWSER DEMO / NO REAL FUNDS</span>
       </div>
-      <div className="flow-panel">
-        <div className="panel-eyebrow">A SMALL BUDGET. A CLEAR BOUNDARY.</div>
-        <ol className="flow">
-          {flow.map(({ title, sub, Icon }, i) => (
-            <li key={title}>
-              <div className="flow-icon">
-                <Icon size={19} strokeWidth={1.5} />
-              </div>
-              <strong>{title}</strong>
-              <span>{sub}</span>
-              {i < flow.length - 1 && (
-                <ChevronRight
-                  className="flow-arrow"
-                  size={15}
-                  aria-hidden="true"
-                />
-              )}
-            </li>
-          ))}
-        </ol>
-      </div>
+      <FlowSteps />
       <div className="vault-panel interactive-vault">
         <div className="vault-heading">
           <span>
@@ -202,7 +175,8 @@ export default function VaultPreview() {
           <div className="vault-controls">
             <div className="cap-label">DEMO DAILY ALLOWANCE</div>
             <div className="cap-value">
-              <output aria-live="off">{formatSats(budget)}</output> <span>sats</span>
+              <output aria-live="off">{formatSats(budget)}</output>{" "}
+              <span>sats</span>
             </div>
             <div className="cap-note">
               {formatSats(PER_TX)} sats per transaction
