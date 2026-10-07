@@ -1,5 +1,6 @@
 import { challengeSha256, decideX402, encodeProofHeader, buildProof, inspectProof, type X402Challenge, type X402Proof } from "./x402";
 import type { Policy, Usage } from "./policy";
+import { defaultBroadcast } from "./send";
 
 export const DEFAULT_DELEGATOR_PATH = "/delegate/x402";
 
@@ -126,7 +127,7 @@ export async function completeDelegation(opts: {
 export type SettleX402Result =
   | {
       ok: true;
-      broadcast: false;
+      broadcast: boolean;
       txid: string;
       header: string;
       proof: X402Proof;
@@ -140,6 +141,13 @@ export type SettleX402Result =
       message: string;
     };
 
+export function shouldBroadcast(flag?: boolean, env = process.env.DOGFOOD_X402_BROADCAST): boolean {
+  if (flag === true) return true;
+  if (flag === false) return false;
+  const v = (env ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 export async function settleX402(opts: {
   policy: Policy;
   usage: Usage;
@@ -149,6 +157,8 @@ export async function settleX402(opts: {
   method?: string;
   path?: string;
   query?: string;
+  broadcast?: boolean;
+  broadcastFn?: (raw: string) => Promise<{ txid: string }>;
 }): Promise<SettleX402Result> {
   const decided = decideX402(opts.policy, opts.usage, opts.challenge);
   if (!decided.ok) {
@@ -222,13 +232,30 @@ export async function settleX402(opts: {
   if (!check.ok) {
     return { ok: false, broadcast: false, code: check.code, message: check.message };
   }
+
+  const doBroadcast = shouldBroadcast(opts.broadcast);
+  if (doBroadcast) {
+    try {
+      await (opts.broadcastFn ?? defaultBroadcast)(completed.rawtxHex);
+    } catch (e) {
+      return {
+        ok: false,
+        broadcast: false,
+        code: "BROADCAST",
+        message: `REJECTED: Broadcast failed: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+  }
+
   return {
     ok: true,
-    broadcast: false,
+    broadcast: doBroadcast,
     txid: completed.txid,
     header: encodeProofHeader(proof),
     proof,
     partialTxHex,
-    message: "Delegator completed the settlement tx. Proof is ready. Dogfood did not broadcast.",
+    message: doBroadcast
+      ? "Delegator completed the settlement tx. Proof is ready. Broadcast submitted."
+      : "Delegator completed the settlement tx. Proof is ready. Dogfood did not broadcast.",
   };
 }

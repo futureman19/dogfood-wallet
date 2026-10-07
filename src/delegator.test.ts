@@ -211,4 +211,103 @@ describe("settleX402", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].startsWith("POST http://delegator.example/delegate/x402")).toBe(true);
   });
+
+  test("broadcast:true POSTs the completed tx via broadcastFn", async () => {
+    const completed = byName("txid_derivation");
+    const fetchFn = async () =>
+      new Response(JSON.stringify({ completed_tx: completed.rawtx_hex, txid: completed.txid }), { status: 200 });
+    const sent: string[] = [];
+    const r = await settleX402({
+      policy,
+      usage: ZERO_USAGE,
+      challenge: ch,
+      delegatorUrl: "http://delegator.example",
+      fetchFn,
+      broadcast: true,
+      broadcastFn: async (raw) => {
+        sent.push(raw);
+        return { txid: completed.txid! };
+      },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.broadcast).toBe(true);
+    expect(sent).toEqual([completed.rawtx_hex]);
+  });
+
+  test("explicit broadcast:false wins over DOGFOOD_X402_BROADCAST=1", async () => {
+    const completed = byName("txid_derivation");
+    const fetchFn = async () =>
+      new Response(JSON.stringify({ completed_tx: completed.rawtx_hex, txid: completed.txid }), { status: 200 });
+    let hits = 0;
+    const prev = process.env.DOGFOOD_X402_BROADCAST;
+    process.env.DOGFOOD_X402_BROADCAST = "1";
+    try {
+      const r = await settleX402({
+        policy,
+        usage: ZERO_USAGE,
+        challenge: ch,
+        delegatorUrl: "http://delegator.example",
+        fetchFn,
+        broadcast: false,
+        broadcastFn: async () => {
+          hits += 1;
+          return { txid: completed.txid! };
+        },
+      });
+      expect(r.ok).toBe(true);
+      expect(r.broadcast).toBe(false);
+      expect(hits).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env.DOGFOOD_X402_BROADCAST;
+      else process.env.DOGFOOD_X402_BROADCAST = prev;
+    }
+  });
+
+  test("DOGFOOD_X402_BROADCAST=1 enables broadcast when the flag is omitted", async () => {
+    const completed = byName("txid_derivation");
+    const fetchFn = async () =>
+      new Response(JSON.stringify({ completed_tx: completed.rawtx_hex, txid: completed.txid }), { status: 200 });
+    let hits = 0;
+    const prev = process.env.DOGFOOD_X402_BROADCAST;
+    process.env.DOGFOOD_X402_BROADCAST = "1";
+    try {
+      const r = await settleX402({
+        policy,
+        usage: ZERO_USAGE,
+        challenge: ch,
+        delegatorUrl: "http://delegator.example",
+        fetchFn,
+        broadcastFn: async () => {
+          hits += 1;
+          return { txid: completed.txid! };
+        },
+      });
+      expect(r.ok).toBe(true);
+      expect(r.broadcast).toBe(true);
+      expect(hits).toBe(1);
+    } finally {
+      if (prev === undefined) delete process.env.DOGFOOD_X402_BROADCAST;
+      else process.env.DOGFOOD_X402_BROADCAST = prev;
+    }
+  });
+
+  test("broadcast failure is BROADCAST and not ok", async () => {
+    const completed = byName("txid_derivation");
+    const fetchFn = async () =>
+      new Response(JSON.stringify({ completed_tx: completed.rawtx_hex, txid: completed.txid }), { status: 200 });
+    const r = await settleX402({
+      policy,
+      usage: ZERO_USAGE,
+      challenge: ch,
+      delegatorUrl: "http://delegator.example",
+      fetchFn,
+      broadcast: true,
+      broadcastFn: async () => {
+        throw new Error("ARC 400");
+      },
+    });
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe("BROADCAST");
+    expect(r.broadcast).toBe(false);
+  });
 });

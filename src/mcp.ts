@@ -122,14 +122,15 @@ export function createServer(root: string) {
     "x402_delegate",
     {
       description:
-        "Ask the configured Merkle Works delegator (DOGFOOD_X402_DELEGATOR_URL) to complete a 402 settlement tx, then return X402-Proof. Policy-gated. Does not broadcast. Does not spend local vault coins on the nonce UTXO.",
+        "Ask the configured Merkle Works delegator (DOGFOOD_X402_DELEGATOR_URL) to complete a 402 settlement tx, then return X402-Proof. Policy-gated. Broadcast is off unless broadcast=true or DOGFOOD_X402_BROADCAST=1. Does not spend local vault coins on the nonce UTXO.",
       inputSchema: {
         challenge: z.string().describe("X402-Challenge header value (base64url JSON)"),
         method: z.string().optional().describe("HTTP method of the paid request"),
         path: z.string().optional().describe("HTTP path of the paid request"),
+        broadcast: z.boolean().optional().describe("If true, submit the completed tx to ARC. Default off."),
       },
     },
-    async ({ challenge, method, path }) => {
+    async ({ challenge, method, path, broadcast }) => {
       const vault = loadVault(root);
       const decoded = decodeChallengeHeader(challenge);
       const result = await settleX402({
@@ -138,6 +139,7 @@ export function createServer(root: string) {
         challenge: decoded,
         method,
         path,
+        broadcast,
       });
       return text(result, !result.ok);
     },

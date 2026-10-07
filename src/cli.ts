@@ -23,7 +23,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts split [piece-sats]
   bun src/cli.ts x402-inspect <X402-Challenge-header>
   bun src/cli.ts x402-proof <X402-Challenge-header> <rawtx-hex> [method] [path]
-  bun src/cli.ts x402-delegate <X402-Challenge-header> [method] [path]
+  bun src/cli.ts x402-delegate <X402-Challenge-header> [method] [path] [--broadcast]
   bun src/cli.ts mcp
   bun src/cli.ts mcp-http
 
@@ -142,15 +142,19 @@ async function main() {
       break;
     }
     case "x402-delegate": {
-      if (!a) die("Usage: x402-delegate <X402-Challenge-header> [method] [path]");
+      if (!a) die("Usage: x402-delegate <X402-Challenge-header> [method] [path] [--broadcast]");
       const vault = loadVault(root);
       const challenge = decodeChallengeHeader(a);
+      const extra = [b, ...rest].filter((x): x is string => Boolean(x));
+      const wantBroadcast = extra.includes("--broadcast");
+      const positional = extra.filter((x) => x !== "--broadcast");
       const result = await settleX402({
         policy: vault.policy,
         usage: loadUsage(root),
         challenge,
-        method: b || challenge.method,
-        path: rest[0] || challenge.path,
+        method: positional[0] || challenge.method,
+        path: positional[1] || challenge.path,
+        broadcast: wantBroadcast ? true : undefined,
       });
       console.log(JSON.stringify(result, null, 2));
       if (!result.ok) process.exit(1);

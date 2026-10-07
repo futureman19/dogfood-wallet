@@ -99,7 +99,7 @@ bun src/cli.ts x402-delegate <X402-Challenge>
 
 Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-256, base64url, header binding, body hash, Bitcoin txid).
 
-`x402-delegate` POSTs `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402` (Merkle Works wire format), then builds `X402-Proof`. Unset URL → `NEED_DELEGATOR` (no fetch, no demo host). Policy still gates the payee. **Does not broadcast.** The merchant nonce UTXO is theirs; Dogfood does not spend local vault coins on it.
+`x402-delegate` POSTs `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402` (Merkle Works wire format), then builds `X402-Proof`. Unset URL → `NEED_DELEGATOR` (no fetch, no demo host). Policy still gates the payee. Broadcast is **off** unless `--broadcast` or `DOGFOOD_X402_BROADCAST=1` (uses the same GorillaPool ARC path as `send`). The merchant nonce UTXO is theirs; Dogfood does not spend local vault coins on it.
 
 ## Later
 
