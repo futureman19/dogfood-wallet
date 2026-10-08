@@ -29,6 +29,10 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts x402-inspect <X402-Challenge-header>
   bun src/cli.ts x402-proof <X402-Challenge-header> <rawtx-hex> [method] [path]
   bun src/cli.ts x402-delegate <X402-Challenge-header> [method] [path] [--broadcast]
+  bun src/cli.ts evm-address
+  bun src/cli.ts evm-balance
+  bun src/cli.ts x402-pay <url>
+  bun src/cli.ts delegator [port]
   bun src/cli.ts allowance-script <agent-pubkey-hex> <owner-pubkey-hex>
   bun src/cli.ts allowance-inspect <descriptor-json-or-file>
   bun src/cli.ts allowance-fund <agent-pubkey-hex> <sats> [pieces]
@@ -260,6 +264,37 @@ async function main() {
         `Fee delegator listening on http://127.0.0.1:${srv.port} (pool ${srv.address}). POST /delegate/x402 {partial_tx}. Ctrl-C to stop.`,
       );
       await new Promise(() => {});
+      break;
+    }
+    case "evm-address": {
+      const { deriveEvmAddress } = await import("./evm");
+      console.log(deriveEvmAddress(loadVault(root).key));
+      break;
+    }
+    case "evm-balance": {
+      const { deriveEvmAddress, usdcBalanceOf } = await import("./evm");
+      const address = deriveEvmAddress(loadVault(root).key);
+      const bal = await usdcBalanceOf(address);
+      console.log(
+        JSON.stringify({ network: "base", address, usdcBaseUnits: bal.toString(), usdc: (Number(bal) / 1e6).toFixed(6) }, null, 2),
+      );
+      break;
+    }
+    case "x402-pay": {
+      if (!a) die("Usage: x402-pay <url>");
+      const vault = loadVault(root);
+      const { deriveEvmAddress } = await import("./evm");
+      const { settleUsdcX402 } = await import("./evm-x402");
+      const r = await settleUsdcX402({
+        url: a,
+        key: vault.key,
+        from: deriveEvmAddress(vault.key),
+        pocket: vault.policy.evm?.usdc,
+        killfileOn: vault.policy.killfileOn,
+        usage: loadUsage(root, new Date(), "usdc-base"),
+        onSpend: (row) => appendFileSync(vaultPaths(root).log, JSON.stringify(row) + "\n"),
+      });
+      console.log(JSON.stringify(r, null, 2));
       break;
     }
     default:

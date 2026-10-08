@@ -8,6 +8,7 @@ import {
   DEFAULT_MAX_SATS_PER_DAY,
   isValidAddress,
   usageFromLog,
+  type EvmAssetPolicy,
   type Policy,
 } from "./policy";
 
@@ -95,6 +96,28 @@ function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
     maxSatsLifetime: optionalCap(parsed.maxSatsLifetime),
     allowlist,
     killfileOn,
+    evm: parseEvmBlock(parsed.evm),
+  };
+}
+
+// Optional evm block: {"evm":{"usdc":{"maxPerTx":1000000,"maxPerDay":null,
+// "maxLifetime":null,"allowlist":["0x..."]}}}. Missing block = pocket
+// disabled. Present-but-empty usdc block = 1 USDC/tx default, unrestricted
+// allowlist (mirrors legacy BSV semantics for a human-written config).
+function parseEvmBlock(raw: unknown): { usdc?: EvmAssetPolicy } | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const usdc = (raw as Record<string, unknown>).usdc;
+  if (typeof usdc !== "object" || usdc === null) return {};
+  const u = usdc as Record<string, unknown>;
+  return {
+    usdc: {
+      maxPerTx: typeof u.maxPerTx === "number" && u.maxPerTx > 0 ? Math.floor(u.maxPerTx) : 1_000_000,
+      maxPerDay: optionalCap(u.maxPerDay),
+      maxLifetime: optionalCap(u.maxLifetime),
+      allowlist: Array.isArray(u.allowlist)
+        ? u.allowlist.filter((a): a is string => typeof a === "string")
+        : null,
+    },
   };
 }
 
@@ -125,10 +148,10 @@ export function allowDestination(root: string, address: string): string[] {
   return list;
 }
 
-export function loadUsage(root: string, now = new Date()) {
+export function loadUsage(root: string, now = new Date(), asset = "bsv") {
   const p = vaultPaths(root);
-  if (!existsSync(p.log)) return usageFromLog([], now);
-  return usageFromLog(readFileSync(p.log, "utf8").split(/\r?\n/), now);
+  if (!existsSync(p.log)) return usageFromLog([], now, asset);
+  return usageFromLog(readFileSync(p.log, "utf8").split(/\r?\n/), now, asset);
 }
 
 export type LoadedVault = {

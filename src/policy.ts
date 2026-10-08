@@ -8,6 +8,8 @@ export type Policy = {
   /** null = unrestricted (legacy). [] = deny all until a human allows an address. */
   allowlist: string[] | null;
   killfileOn: boolean;
+  /** Per-asset non-BSV pockets. Absent = DISABLED (fail-closed). */
+  evm?: { usdc?: EvmAssetPolicy };
 };
 
 export type Usage = {
@@ -15,7 +17,94 @@ export type Usage = {
   spentLifetime: number;
 };
 
-export type RejectCode = "CAP" | "KILL" | "BAD_ADDRESS" | "BAD_AMOUNT" | "ALLOWLIST" | "DAY" | "LIFETIME";
+export type RejectCode =
+  | "CAP"
+  | "KILL"
+  | "BAD_ADDRESS"
+  | "BAD_AMOUNT"
+  | "ALLOWLIST"
+  | "DAY"
+  | "LIFETIME"
+  | "DISABLED";
+
+// Per-asset pocket policy for non-BSV adapters. Amounts are native base
+// units of the asset (USDC: 6 decimals). A missing pocket config means the
+// asset is DISABLED — new adapters start locked until a human opts in.
+export type EvmAssetPolicy = {
+  maxPerTx: number;
+  maxPerDay: number | null;
+  maxLifetime: number | null;
+  /** null = unrestricted; [] = deny all. Compared case-insensitively. */
+  allowlist: string[] | null;
+};
+
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+export function isValidEvmAddress(address: string): boolean {
+  return EVM_ADDRESS.test(address);
+}
+
+export function evaluateEvmSend(
+  pocket: EvmAssetPolicy | undefined,
+  killfileOn: boolean,
+  amount: number,
+  to: string,
+  usage: Usage = { spentToday: 0, spentLifetime: 0 },
+): Decision {
+  if (!pocket) {
+    return {
+      ok: false,
+      code: "DISABLED",
+      message: "REJECTED: no USDC pocket configured. Add an evm.usdc block to policy.json to enable it.",
+    };
+  }
+  if (!Number.isInteger(amount) || amount <= 0 || !Number.isSafeInteger(amount)) {
+    return {
+      ok: false,
+      code: "BAD_AMOUNT",
+      message: `REJECTED: Amount must be a positive integer of USDC base units (got ${String(amount)}).`,
+    };
+  }
+  if (killfileOn) {
+    return {
+      ok: false,
+      code: "KILL",
+      message: "REJECTED: Killfile STOP_SPENDING is on. Human must delete it to resume.",
+    };
+  }
+  if (!isValidEvmAddress(to)) {
+    return { ok: false, code: "BAD_ADDRESS", message: `REJECTED: Payee is not a 0x EVM address (got ${to}).` };
+  }
+  if (amount > pocket.maxPerTx) {
+    return {
+      ok: false,
+      code: "CAP",
+      message: `REJECTED: Exceeds pocket cap of ${pocket.maxPerTx} base units/tx (requested ${amount}).`,
+    };
+  }
+  if (pocket.allowlist !== null && !pocket.allowlist.some((a) => a.toLowerCase() === to.toLowerCase())) {
+    return {
+      ok: false,
+      code: "ALLOWLIST",
+      message: `REJECTED: Payee ${to} is not on the USDC pocket allowlist.`,
+    };
+  }
+  if (pocket.maxPerDay !== null && usage.spentToday + amount > pocket.maxPerDay) {
+    return {
+      ok: false,
+      code: "DAY",
+      message: `REJECTED: Exceeds pocket daily cap of ${pocket.maxPerDay} base units (spent ${usage.spentToday}, requested ${amount}).`,
+    };
+  }
+  if (pocket.maxLifetime !== null && usage.spentLifetime + amount > pocket.maxLifetime) {
+    return {
+      ok: false,
+      code: "LIFETIME",
+      message: `REJECTED: Exceeds pocket lifetime cap of ${pocket.maxLifetime} base units (spent ${usage.spentLifetime}, requested ${amount}).`,
+    };
+  }
+  return { ok: true };
+}
 
 export type Decision =
   | { ok: true }
@@ -137,7 +226,7 @@ export function utcDay(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function usageFromLog(lines: string[], now: Date = new Date()): Usage {
+export function usageFromLog(lines: string[], now: Date = new Date(), asset = "bsv"): Usage {
   const today = utcDay(now);
   let spentToday = 0;
   let spentLifetime = 0;
@@ -145,8 +234,10 @@ export function usageFromLog(lines: string[], now: Date = new Date()): Usage {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
-      const row = JSON.parse(trimmed) as { t?: string; amount?: unknown; kind?: unknown };
+      const row = JSON.parse(trimmed) as { t?: string; amount?: unknown; kind?: unknown; asset?: unknown };
       if (row.kind === "sweep" || row.kind === "split" || row.kind === "allowance-sweep") continue;
+      const rowAsset = typeof row.asset === "string" ? row.asset : "bsv";
+      if (rowAsset !== asset) continue;
       const amount =
         typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
       spentLifetime += amount;
