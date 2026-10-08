@@ -160,12 +160,13 @@ async function main() {
       break;
     }
     case "x402-delegate": {
-      if (!a) die("Usage: x402-delegate <X402-Challenge-header> [method] [path] [--broadcast]");
+      if (!a) die("Usage: x402-delegate <X402-Challenge-header> [method] [path] [--broadcast] [--vault-fund]");
       const vault = loadVault(root);
       const challenge = decodeChallengeHeader(a);
       const extra = [b, ...rest].filter((x): x is string => Boolean(x));
       const wantBroadcast = extra.includes("--broadcast");
-      const positional = extra.filter((x) => x !== "--broadcast");
+      const vaultFund = extra.includes("--vault-fund");
+      const positional = extra.filter((x) => x !== "--broadcast" && x !== "--vault-fund");
       const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
       if (!loaded.ok) die(loaded.message);
       const result = await settleX402({
@@ -176,7 +177,7 @@ async function main() {
         path: positional[1] || challenge.path,
         broadcast: wantBroadcast ? true : undefined,
         envelope: loaded.envelope,
-        fund: { key: vault.key, address: vault.address },
+        fund: vaultFund ? { key: vault.key, address: vault.address } : undefined,
         onSpend: (entry) => appendFileSync(vaultPaths(root).log, `${JSON.stringify(entry)}\n`),
       });
       console.log(JSON.stringify(result, null, 2));

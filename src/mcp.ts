@@ -124,15 +124,16 @@ export function createServer(root: string) {
     "x402_delegate",
     {
       description:
-        "Ask the configured Merkle Works delegator (DOGFOOD_X402_DELEGATOR_URL) to complete a 402 settlement tx, then return X402-Proof. The vault funds the payment from its own coins (policy-gated); the delegator covers the miner fee. Broadcast is off unless broadcast=true or DOGFOOD_X402_BROADCAST=1; broadcasts use ARC with a WoC fallback on fee-policy rejections.",
+        "Ask the configured Merkle Works delegator (DOGFOOD_X402_DELEGATOR_URL) to complete a 402 settlement tx, then return X402-Proof. Policy-gated. Default mode follows the frozen v1 demo model (gateway sponsors the settlement from its pool; vaultPaid=false). Pass vault_fund=true to pay from vault coins instead. Broadcast is off unless broadcast=true or DOGFOOD_X402_BROADCAST=1; broadcasts use ARC with a WoC fallback on fee-policy rejections.",
       inputSchema: {
         challenge: z.string().describe("X402-Challenge header value (base64url JSON)"),
         method: z.string().optional().describe("HTTP method of the paid request"),
         path: z.string().optional().describe("HTTP path of the paid request"),
-        broadcast: z.boolean().optional().describe("If true, submit the completed tx to ARC. Default off."),
+        broadcast: z.boolean().optional().describe("If true, submit the completed tx. Default off."),
+        vault_fund: z.boolean().optional().describe("If true, fund the payment from vault coins (0xC1 signed input + change). Default off."),
       },
     },
-    async ({ challenge, method, path, broadcast }) => {
+    async ({ challenge, method, path, broadcast, vault_fund }) => {
       const vault = loadVault(root);
       const decoded = decodeChallengeHeader(challenge);
       const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
@@ -145,7 +146,7 @@ export function createServer(root: string) {
         path,
         broadcast,
         envelope: loaded.envelope,
-        fund: { key: vault.key, address: vault.address },
+        fund: vault_fund ? { key: vault.key, address: vault.address } : undefined,
         onSpend: (entry) => appendFileSync(vaultPaths(root).log, `${JSON.stringify(entry)}\n`),
       });
       return text(result, !result.ok);

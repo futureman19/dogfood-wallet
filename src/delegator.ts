@@ -217,36 +217,45 @@ export async function settleX402(opts: {
     };
   }
 
-  if (!opts.fund) {
-    return {
-      ok: false,
-      broadcast: false,
-      code: "NEED_FUNDS",
-      message:
-        "REJECTED: Vault funding required. Dogfood pays x402 challenges from vault coins; a delegator subsidy is not a payment.",
-    };
-  }
-
   let partialTxHex: string;
   let changeSats = 0;
-  try {
-    const built = await buildClientFundedPartialTx({
-      challenge: opts.challenge,
-      key: opts.fund.key,
-      address: opts.fund.address,
-      fetchUtxos: opts.fund.fetchUtxos,
-      fetchTxHex: opts.fund.fetchTxHex,
-    });
-    partialTxHex = built.partialTxHex;
-    changeSats = built.changeSats;
-  } catch (e) {
-    const code = e instanceof X402FundsError ? "INSUFFICIENT" : "BAD_CHALLENGE";
-    return {
-      ok: false,
-      broadcast: false,
-      code,
-      message: e instanceof Error ? e.message : String(e),
-    };
+  const vaultPaid = Boolean(opts.fund);
+  if (opts.fund) {
+    try {
+      const built = await buildClientFundedPartialTx({
+        challenge: opts.challenge,
+        key: opts.fund.key,
+        address: opts.fund.address,
+        fetchUtxos: opts.fund.fetchUtxos,
+        fetchTxHex: opts.fund.fetchTxHex,
+      });
+      partialTxHex = built.partialTxHex;
+      changeSats = built.changeSats;
+    } catch (e) {
+      const code = e instanceof X402FundsError ? "INSUFFICIENT" : "BAD_CHALLENGE";
+      return {
+        ok: false,
+        broadcast: false,
+        code,
+        message: e instanceof Error ? e.message : String(e),
+      };
+    }
+  } else {
+    // Gateway-template (Profile B) settlement: the gateway pre-signed the
+    // nonce and its delegator funds the payment from its own pool. That is
+    // the frozen v1 demo model — valid interop, but the vault pays nothing,
+    // so vaultPaid stays false and no spend is ever logged.
+    const template = opts.challenge.template?.rawtx_hex;
+    if (!template) {
+      return {
+        ok: false,
+        broadcast: false,
+        code: "NEED_FUNDS",
+        message:
+          "REJECTED: Vault funding required. Dogfood pays x402 challenges from vault coins; a delegator subsidy is not a payment.",
+      };
+    }
+    partialTxHex = template;
   }
 
   const nonce = opts.challenge.nonce_utxo;
@@ -307,17 +316,22 @@ export async function settleX402(opts: {
         message: `REJECTED: Broadcast failed: ${e instanceof Error ? e.message : String(e)}`,
       };
     }
-    opts.onSpend?.({
-      t: new Date().toISOString(),
-      txid: completed.txid,
-      to: p2pkhAddressFromLock(String(opts.challenge.payee_locking_script_hex ?? "")) ?? "",
-      amount: opts.challenge.amount_sats,
-      fee: 0,
-      note: "x402 settle (delegator covers fee)",
-      kind: "x402",
-    });
+    if (vaultPaid) {
+      opts.onSpend?.({
+        t: new Date().toISOString(),
+        txid: completed.txid,
+        to: p2pkhAddressFromLock(String(opts.challenge.payee_locking_script_hex ?? "")) ?? "",
+        amount: opts.challenge.amount_sats,
+        fee: 0,
+        note: "x402 settle (delegator covers fee)",
+        kind: "x402",
+      });
+    }
   }
 
+  const detail = vaultPaid
+    ? "Vault funded the settlement; delegator added the fee."
+    : "Gateway sponsored this settlement from its own pool (v1 demo model); the vault paid nothing.";
   return {
     ok: true,
     broadcast: doBroadcast,
@@ -325,10 +339,8 @@ export async function settleX402(opts: {
     header: encodeProofHeader(proof),
     proof,
     partialTxHex,
-    vaultPaid: true,
+    vaultPaid,
     changeSats,
-    message: doBroadcast
-      ? "Vault funded the settlement; delegator added the fee. Proof is ready. Broadcast submitted."
-      : "Vault funded the settlement; delegator added the fee. Proof is ready. Dogfood did not broadcast.",
+    message: `${detail} Proof is ready.${doBroadcast ? " Broadcast submitted." : " Dogfood did not broadcast."}`,
   };
 }

@@ -465,6 +465,35 @@ describe("settleX402", () => {
     expect(hits).toBe(0);
   });
 
+  test("gateway-template challenge without fund settles sponsored: vaultPaid false, no spend logged", async () => {
+    const completed = byName("txid_derivation");
+    const fetchFn = async (url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.partial_tx).toBe(challengeWithTemplate().template!.rawtx_hex);
+      return new Response(JSON.stringify({ completed_tx: completed.rawtx_hex, txid: completed.txid }), { status: 200 });
+    };
+    const spends: Array<Record<string, unknown>> = [];
+    const sponsored = challengeWithTemplate();
+    const r = await settleX402({
+      policy,
+      usage: ZERO_USAGE,
+      challenge: sponsored,
+      delegatorUrl: "http://delegator.example",
+      fetchFn,
+      broadcast: true,
+      broadcastFn: async () => ({ txid: completed.txid! }),
+      onSpend: (e) => spends.push(e),
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.vaultPaid).toBe(false);
+      expect(r.changeSats).toBe(0);
+      expect(r.message).toMatch(/sponsored/i);
+    }
+    expect(r.broadcast).toBe(true);
+    expect(spends).toHaveLength(0);
+  });
+
   test("reports the spend via onSpend only after a successful broadcast", async () => {
     const completed = byName("txid_derivation");
     const fetchFn = async () =>
