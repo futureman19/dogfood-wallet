@@ -26,8 +26,12 @@ export async function defaultFetchTxHex(txid: string): Promise<string> {
   return (await response.text()).trim();
 }
 
-export async function defaultBroadcast(raw: string): Promise<{ txid: string }> {
-  const response = await fetch(ARC_URL, {
+function isFeePolicyReject(message: string): boolean {
+  return /fee/i.test(message) && /too low|insufficient|465|461/i.test(message);
+}
+
+async function arcBroadcast(raw: string, fetchFn: typeof fetch): Promise<{ txid: string }> {
+  const response = await fetchFn(ARC_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rawTx: raw }),
@@ -37,6 +41,38 @@ export async function defaultBroadcast(raw: string): Promise<{ txid: string }> {
   const parsed = JSON.parse(body) as { txid?: string };
   if (!parsed.txid) throw new Error(`Broadcast failed: ${body}`);
   return { txid: parsed.txid };
+}
+
+async function wocBroadcast(raw: string, fetchFn: typeof fetch): Promise<{ txid: string }> {
+  const response = await fetchFn(`${WOC}/tx/raw`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ txhex: raw }),
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error(`WoC broadcast failed: ${response.status} ${body}`);
+  const parsed = JSON.parse(body) as unknown;
+  if (typeof parsed !== "string" || parsed.length !== 64) {
+    throw new Error(`WoC broadcast failed: ${body}`);
+  }
+  return { txid: parsed };
+}
+
+// ARC is the primary broadcaster. Miner fee policies differ: ARC rejects
+// low-fee x402 settlement txs (461/465) that WoC still relays, so fee-policy
+// rejections fall back to WoC. Other rejections (double-spend, malformed)
+// are terminal and never fall back.
+export async function defaultBroadcast(
+  raw: string,
+  fetchFn: typeof fetch = globalThis.fetch.bind(globalThis),
+): Promise<{ txid: string }> {
+  try {
+    return await arcBroadcast(raw, fetchFn);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (!isFeePolicyReject(message)) throw e;
+    return wocBroadcast(raw, fetchFn);
+  }
 }
 
 function feeFor(inputs: number, outputs: number): number {

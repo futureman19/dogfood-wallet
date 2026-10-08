@@ -1,6 +1,7 @@
-import { challengeSha256, decideX402, encodeProofHeader, buildProof, inspectProof, type X402Challenge, type X402Proof } from "./x402";
+import { P2PKH, Script, Transaction, type PrivateKey } from "@bsv/sdk";
+import { challengeSha256, decideX402, encodeProofHeader, buildProof, inspectProof, p2pkhAddressFromLock, type X402Challenge, type X402Proof } from "./x402";
 import type { Policy, Usage } from "./policy";
-import { defaultBroadcast } from "./send";
+import { defaultBroadcast, defaultFetchTxHex, defaultFetchUtxos, type Utxo } from "./send";
 import { gateAgentSend, type PolicyEnvelope } from "./brc181";
 
 export const DEFAULT_DELEGATOR_PATH = "/delegate/x402";
@@ -26,65 +27,90 @@ export class DelegationError extends Error {
   }
 }
 
-function encodeVarInt(n: number): Buffer {
-  if (n < 0xfd) return Buffer.from([n]);
-  if (n <= 0xffff) {
-    const buf = Buffer.alloc(3);
-    buf[0] = 0xfd;
-    buf.writeUInt16LE(n, 1);
-    return buf;
-  }
-  if (n <= 0xffffffff) {
-    const buf = Buffer.alloc(5);
-    buf[0] = 0xfe;
-    buf.writeUInt32LE(n, 1);
-    return buf;
-  }
-  const buf = Buffer.alloc(9);
-  buf[0] = 0xff;
-  buf.writeBigUInt64LE(BigInt(n), 1);
-  return buf;
+export class X402FundsError extends Error {
+  code = "INSUFFICIENT" as const;
 }
 
-function buildUnsignedPartialTx(
-  nonce: { txid: string; vout: number },
-  lockingScriptHex: string,
-  amountSats: number,
-): string {
-  const parts: Buffer[] = [];
-  const version = Buffer.alloc(4);
-  version.writeUInt32LE(1);
-  parts.push(version);
-  parts.push(encodeVarInt(1));
-  parts.push(Buffer.from(nonce.txid, "hex").reverse());
-  const vout = Buffer.alloc(4);
-  vout.writeUInt32LE(nonce.vout);
-  parts.push(vout);
-  parts.push(encodeVarInt(0));
-  const seq = Buffer.alloc(4);
-  seq.writeUInt32LE(0xffffffff);
-  parts.push(seq);
-  parts.push(encodeVarInt(1));
-  const value = Buffer.alloc(8);
-  value.writeBigUInt64LE(BigInt(amountSats));
-  parts.push(value);
-  const script = Buffer.from(lockingScriptHex, "hex");
-  parts.push(encodeVarInt(script.length));
-  parts.push(script);
-  const locktime = Buffer.alloc(4);
-  locktime.writeUInt32LE(0);
-  parts.push(locktime);
-  return Buffer.concat(parts).toString("hex");
-}
+export type X402Funding = {
+  key: PrivateKey;
+  address: string;
+  fetchUtxos?: (address: string) => Promise<Utxo[]>;
+  fetchTxHex?: (txid: string) => Promise<string>;
+};
 
-export function buildPartialTransaction(challenge: X402Challenge): string {
-  const template = challenge.template?.rawtx_hex;
-  if (template && template.length > 0) return template;
-  const nonce = challenge.nonce_utxo;
-  if (!nonce?.txid) {
+// Builds the client side of an x402 settlement: the vault funds the payment
+// with its own UTXOs (smallest-first), signed SIGHASH_ALL|FORKID|ANYONECANPAY
+// (0xC1) so the delegator can append fee inputs afterwards. The gateway's
+// nonce input stays at index 0 — its pre-signed template script is committed
+// to output 0 via SIGHASH_SINGLE, so the payee output must remain first and
+// vault change comes after. The delegator covers the miner fee; the vault
+// pays exactly amount_sats (the rest returns as change).
+export async function buildClientFundedPartialTx(opts: {
+  challenge: X402Challenge;
+  key: PrivateKey;
+  address: string;
+  fetchUtxos?: (address: string) => Promise<Utxo[]>;
+  fetchTxHex?: (txid: string) => Promise<string>;
+}): Promise<{ partialTxHex: string; changeSats: number; spentUtxos: Utxo[] }> {
+  const ch = opts.challenge;
+  const amount = ch.amount_sats;
+  const fetchUtxos = opts.fetchUtxos ?? defaultFetchUtxos;
+  const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
+
+  const utxos = await fetchUtxos(opts.address);
+  const sorted = [...utxos].sort((a, b) => a.value - b.value);
+  const chosen: Utxo[] = [];
+  let total = 0;
+  for (const u of sorted) {
+    chosen.push(u);
+    total += u.value;
+    if (total >= amount) break;
+  }
+  if (total < amount) {
+    throw new X402FundsError(
+      `REJECTED: Vault cannot fund x402 payment (${total} sats available, need ${amount}).`,
+    );
+  }
+
+  const tx = new Transaction();
+  const template = ch.template?.rawtx_hex;
+  if (template) {
+    const tin = Transaction.fromHex(template).inputs[0];
+    tx.addInput({
+      sourceTXID: tin.sourceTXID!,
+      sourceOutputIndex: tin.sourceOutputIndex,
+      unlockingScript: tin.unlockingScript,
+      sequence: tin.sequence ?? 0xffffffff,
+    });
+  } else if (ch.nonce_utxo?.txid) {
+    tx.addInput({
+      sourceTXID: ch.nonce_utxo.txid,
+      sourceOutputIndex: ch.nonce_utxo.vout,
+      unlockingScript: new Script(),
+      sequence: 0xffffffff,
+    });
+  } else {
     throw new Error("REJECTED: x402 challenge has no nonce_utxo and no template.");
   }
-  return buildUnsignedPartialTx(nonce, challenge.payee_locking_script_hex, challenge.amount_sats);
+
+  for (const u of chosen) {
+    const source = Transaction.fromHex(await fetchTxHex(u.tx_hash));
+    tx.addInput({
+      sourceTransaction: source,
+      sourceTXID: u.tx_hash,
+      sourceOutputIndex: u.tx_pos,
+      unlockingScriptTemplate: new P2PKH().unlock(opts.key, "all", true),
+      sequence: 0xffffffff,
+    });
+  }
+
+  tx.addOutput({ satoshis: amount, lockingScript: Script.fromHex(ch.payee_locking_script_hex) });
+  const change = total - amount;
+  if (change >= 1) {
+    tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(opts.address) });
+  }
+  await tx.sign();
+  return { partialTxHex: tx.toHex(), changeSats: Math.max(change, 0), spentUtxos: chosen };
 }
 
 export function delegatorEndpoint(baseUrl: string, path = DEFAULT_DELEGATOR_PATH): string {
@@ -133,6 +159,8 @@ export type SettleX402Result =
       header: string;
       proof: X402Proof;
       partialTxHex: string;
+      vaultPaid: boolean;
+      changeSats: number;
       message: string;
     }
   | {
@@ -162,6 +190,8 @@ export async function settleX402(opts: {
   broadcastFn?: (raw: string) => Promise<{ txid: string }>;
   envelope?: PolicyEnvelope | null;
   origin?: string;
+  fund?: X402Funding;
+  onSpend?: (entry: Record<string, unknown>) => void;
 }): Promise<SettleX402Result> {
   const decided = decideX402(opts.policy, opts.usage, opts.challenge);
   if (!decided.ok) {
@@ -187,14 +217,34 @@ export async function settleX402(opts: {
     };
   }
 
-  let partialTxHex: string;
-  try {
-    partialTxHex = buildPartialTransaction(opts.challenge);
-  } catch (e) {
+  if (!opts.fund) {
     return {
       ok: false,
       broadcast: false,
-      code: "BAD_CHALLENGE",
+      code: "NEED_FUNDS",
+      message:
+        "REJECTED: Vault funding required. Dogfood pays x402 challenges from vault coins; a delegator subsidy is not a payment.",
+    };
+  }
+
+  let partialTxHex: string;
+  let changeSats = 0;
+  try {
+    const built = await buildClientFundedPartialTx({
+      challenge: opts.challenge,
+      key: opts.fund.key,
+      address: opts.fund.address,
+      fetchUtxos: opts.fund.fetchUtxos,
+      fetchTxHex: opts.fund.fetchTxHex,
+    });
+    partialTxHex = built.partialTxHex;
+    changeSats = built.changeSats;
+  } catch (e) {
+    const code = e instanceof X402FundsError ? "INSUFFICIENT" : "BAD_CHALLENGE";
+    return {
+      ok: false,
+      broadcast: false,
+      code,
       message: e instanceof Error ? e.message : String(e),
     };
   }
@@ -257,6 +307,15 @@ export async function settleX402(opts: {
         message: `REJECTED: Broadcast failed: ${e instanceof Error ? e.message : String(e)}`,
       };
     }
+    opts.onSpend?.({
+      t: new Date().toISOString(),
+      txid: completed.txid,
+      to: p2pkhAddressFromLock(String(opts.challenge.payee_locking_script_hex ?? "")) ?? "",
+      amount: opts.challenge.amount_sats,
+      fee: 0,
+      note: "x402 settle (delegator covers fee)",
+      kind: "x402",
+    });
   }
 
   return {
@@ -266,8 +325,10 @@ export async function settleX402(opts: {
     header: encodeProofHeader(proof),
     proof,
     partialTxHex,
+    vaultPaid: true,
+    changeSats,
     message: doBroadcast
-      ? "Delegator completed the settlement tx. Proof is ready. Broadcast submitted."
-      : "Delegator completed the settlement tx. Proof is ready. Dogfood did not broadcast.",
+      ? "Vault funded the settlement; delegator added the fee. Proof is ready. Broadcast submitted."
+      : "Vault funded the settlement; delegator added the fee. Proof is ready. Dogfood did not broadcast.",
   };
 }

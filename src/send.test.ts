@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initVault, killVault, allowDestination } from "./vault";
-import { sendPayment, sweepPayment, splitPayment, selectUtxos } from "./send";
+import { sendPayment, sweepPayment, splitPayment, selectUtxos, defaultBroadcast } from "./send";
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "dogfood-send-"));
@@ -276,3 +276,44 @@ describe("splitPayment", () => {
   });
 });
 
+
+describe("defaultBroadcast", () => {
+  const raw = "aa";
+  const fee465 = JSON.stringify({
+    detail: "arc error 465: transaction fee is too low\nminimum expected fee: 34, actual fee: 1",
+  });
+
+  test("falls back to WoC when ARC rejects for fee policy", async () => {
+    const calls: string[] = [];
+    const fetchFn = async (url: unknown) => {
+      calls.push(String(url));
+      if (String(url).includes("arc")) return new Response(fee465, { status: 465 });
+      return new Response(JSON.stringify("11".repeat(32)), { status: 200 });
+    };
+    const out = await defaultBroadcast(raw, fetchFn as typeof fetch);
+    expect(out.txid).toBe("11".repeat(32));
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain("whatsonchain");
+  });
+
+  test("does not fall back on a non-fee rejection", async () => {
+    const calls: string[] = [];
+    const fetchFn = async (url: unknown) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify({ detail: "missing inputs" }), { status: 400 });
+    };
+    await expect(defaultBroadcast(raw, fetchFn as typeof fetch)).rejects.toThrow(/400/);
+    expect(calls).toHaveLength(1);
+  });
+
+  test("returns the ARC txid without touching WoC when accepted", async () => {
+    const calls: string[] = [];
+    const fetchFn = async (url: unknown) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify({ txid: "22".repeat(32) }), { status: 200 });
+    };
+    const out = await defaultBroadcast(raw, fetchFn as typeof fetch);
+    expect(out.txid).toBe("22".repeat(32));
+    expect(calls).toHaveLength(1);
+  });
+});

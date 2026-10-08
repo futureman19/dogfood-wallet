@@ -7,7 +7,7 @@ import { inspectDescriptor, lockingScriptHex, revocationScriptHex, fundAllowance
 import { fundRequest } from "./fund-request";
 import { verifyPolicyEnvelope, loadPolicyEnvelope } from "./brc181";
 import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault, vaultPaths } from "./vault";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, appendFileSync } from "node:fs";
 
 function die(msg: string, code = 1): never {
   console.error(msg);
@@ -176,6 +176,8 @@ async function main() {
         path: positional[1] || challenge.path,
         broadcast: wantBroadcast ? true : undefined,
         envelope: loaded.envelope,
+        fund: { key: vault.key, address: vault.address },
+        onSpend: (entry) => appendFileSync(vaultPaths(root).log, `${JSON.stringify(entry)}\n`),
       });
       console.log(JSON.stringify(result, null, 2));
       if (!result.ok) process.exit(1);

@@ -7,6 +7,7 @@ import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspe
 import { settleX402 } from "./delegator";
 import { defaultVaultDir, killVault, loadUsage, loadVault, statusVault, vaultPaths } from "./vault";
 import { loadPolicyEnvelope } from "./brc181";
+import { appendFileSync } from "node:fs";
 
 function text(obj: unknown, isError = false) {
   return {
@@ -123,7 +124,7 @@ export function createServer(root: string) {
     "x402_delegate",
     {
       description:
-        "Ask the configured Merkle Works delegator (DOGFOOD_X402_DELEGATOR_URL) to complete a 402 settlement tx, then return X402-Proof. Policy-gated. Broadcast is off unless broadcast=true or DOGFOOD_X402_BROADCAST=1. Does not spend local vault coins on the nonce UTXO.",
+        "Ask the configured Merkle Works delegator (DOGFOOD_X402_DELEGATOR_URL) to complete a 402 settlement tx, then return X402-Proof. The vault funds the payment from its own coins (policy-gated); the delegator covers the miner fee. Broadcast is off unless broadcast=true or DOGFOOD_X402_BROADCAST=1; broadcasts use ARC with a WoC fallback on fee-policy rejections.",
       inputSchema: {
         challenge: z.string().describe("X402-Challenge header value (base64url JSON)"),
         method: z.string().optional().describe("HTTP method of the paid request"),
@@ -144,6 +145,8 @@ export function createServer(root: string) {
         path,
         broadcast,
         envelope: loaded.envelope,
+        fund: { key: vault.key, address: vault.address },
+        onSpend: (entry) => appendFileSync(vaultPaths(root).log, `${JSON.stringify(entry)}\n`),
       });
       return text(result, !result.ok);
     },
