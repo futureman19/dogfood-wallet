@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { defaultFetchUtxos } from "./send";
+import type { BridgeProvider } from "./bridge";
 import { sendPayment, sweepPayment, splitPayment, sendRaw } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { settleX402 } from "./delegator";
@@ -48,6 +49,18 @@ The LLM never sees the key. Policy lives in the signer.
 allow, sweep, split, fund-request, allowance-*, and policy-inspect are human-only (not MCP tools).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
+
+// Exolix is always available (no API key); ChangeNOW joins when bridge.json
+// carries a key. Add future providers here.
+async function bridgeProviders(root: string) {
+  const { loadBridgeConfig } = await import("./bridge");
+  const { exolixProvider } = await import("./bridge-exolix");
+  const { changenowProvider } = await import("./bridge-changenow");
+  const cfg = loadBridgeConfig(vaultPaths(root).bridge);
+  const providers: BridgeProvider[] = [exolixProvider({})];
+  if (cfg.changenowApiKey) providers.push(changenowProvider({ apiKey: cfg.changenowApiKey }));
+  return providers;
+}
 
 async function cmdBalance(root: string) {
   const v = loadVault(root);
@@ -302,12 +315,9 @@ async function main() {
     }
     case "bridge-quote": {
       if (!a) die("Usage: bridge-quote <sats>");
-      const { loadBridgeConfig } = await import("./bridge");
-      const { changenowProvider } = await import("./bridge-changenow");
-      const cfg = loadBridgeConfig(vaultPaths(root).bridge);
-      if (!cfg.changenowApiKey) die("REJECTED: no changenowApiKey in bridge.json (vault dir). Get a free key at changenow.io.");
-      const cn = changenowProvider({ apiKey: cfg.changenowApiKey });
-      const q = await cn.quote({ fromAmountSats: Number(a) });
+      const providers = await bridgeProviders(root);
+      const { bestQuote } = await import("./bridge");
+      const q = await bestQuote(providers, { fromAmountSats: Number(a) });
       console.log(JSON.stringify(q, null, 2));
       break;
     }
@@ -315,10 +325,8 @@ async function main() {
       const vault = loadVault(root);
       const { deriveEvmAddress, usdcBalanceOf } = await import("./evm");
       const { loadBridgeConfig, planRebalance, executeRebalance } = await import("./bridge");
-      const { changenowProvider } = await import("./bridge-changenow");
       const cfg = loadBridgeConfig(vaultPaths(root).bridge);
-      if (!cfg.changenowApiKey) die("REJECTED: no changenowApiKey in bridge.json (vault dir). Get a free key at changenow.io.");
-      const providers = [changenowProvider({ apiKey: cfg.changenowApiKey })];
+      const providers = await bridgeProviders(root);
       const ourPocket = deriveEvmAddress(vault.key);
       let amountSats = a ? Number(a) : null;
       if (amountSats === null) {
@@ -352,16 +360,26 @@ async function main() {
     }
     case "bridge-status": {
       if (!a) die("Usage: bridge-status <orderId>");
-      const { loadBridgeConfig, recordFinishedArrival } = await import("./bridge");
-      const { changenowProvider } = await import("./bridge-changenow");
-      const cfg = loadBridgeConfig(vaultPaths(root).bridge);
-      if (!cfg.changenowApiKey) die("REJECTED: no changenowApiKey in bridge.json (vault dir).");
-      const cn = changenowProvider({ apiKey: cfg.changenowApiKey });
-      const ord = await cn.status(a);
+      const { recordFinishedArrival } = await import("./bridge");
+      const providers = await bridgeProviders(root);
       const logPath = vaultPaths(root).log;
       const rows: Record<string, unknown>[] = existsSync(logPath)
         ? readFileSync(logPath, "utf8").split(/\r?\n/).filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } })
         : [];
+      const logged = rows.find((r) => r.orderId === a && typeof r.provider === "string");
+      const ordered = logged
+        ? [...providers.filter((p) => p.name === logged.provider), ...providers.filter((p) => p.name !== logged.provider)]
+        : providers;
+      let ord = null;
+      for (const p of ordered) {
+        try {
+          ord = await p.status(a);
+          break;
+        } catch {
+          continue;
+        }
+      }
+      if (!ord) die(`REJECTED: no provider recognized order ${a}.`);
       const recorded = recordFinishedArrival(ord, rows);
       if (recorded) appendFileSync(logPath, JSON.stringify(rows[rows.length - 1]) + "\n");
       console.log(JSON.stringify({ ok: true, order: ord, arrivalLogged: recorded }, null, 2));
