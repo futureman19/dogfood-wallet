@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { defaultFetchUtxos } from "./send";
-import { sendPayment, sweepPayment, splitPayment } from "./send";
+import { sendPayment, sweepPayment, splitPayment, sendRaw } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { settleX402 } from "./delegator";
 import { inspectDescriptor, lockingScriptHex, revocationScriptHex, fundAllowance, sweepAllowance } from "./allowance";
@@ -33,6 +33,9 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts evm-balance
   bun src/cli.ts x402-pay <url>
   bun src/cli.ts delegator [port]
+  bun src/cli.ts bridge-quote <sats>
+  bun src/cli.ts bridge-rebalance [sats]
+  bun src/cli.ts bridge-status <orderId>
   bun src/cli.ts allowance-script <agent-pubkey-hex> <owner-pubkey-hex>
   bun src/cli.ts allowance-inspect <descriptor-json-or-file>
   bun src/cli.ts allowance-fund <agent-pubkey-hex> <sats> [pieces]
@@ -295,6 +298,73 @@ async function main() {
         onSpend: (row) => appendFileSync(vaultPaths(root).log, JSON.stringify(row) + "\n"),
       });
       console.log(JSON.stringify(r, null, 2));
+      break;
+    }
+    case "bridge-quote": {
+      if (!a) die("Usage: bridge-quote <sats>");
+      const { loadBridgeConfig } = await import("./bridge");
+      const { changenowProvider } = await import("./bridge-changenow");
+      const cfg = loadBridgeConfig(vaultPaths(root).bridge);
+      if (!cfg.changenowApiKey) die("REJECTED: no changenowApiKey in bridge.json (vault dir). Get a free key at changenow.io.");
+      const cn = changenowProvider({ apiKey: cfg.changenowApiKey });
+      const q = await cn.quote({ fromAmountSats: Number(a) });
+      console.log(JSON.stringify(q, null, 2));
+      break;
+    }
+    case "bridge-rebalance": {
+      const vault = loadVault(root);
+      const { deriveEvmAddress, usdcBalanceOf } = await import("./evm");
+      const { loadBridgeConfig, planRebalance, executeRebalance } = await import("./bridge");
+      const { changenowProvider } = await import("./bridge-changenow");
+      const cfg = loadBridgeConfig(vaultPaths(root).bridge);
+      if (!cfg.changenowApiKey) die("REJECTED: no changenowApiKey in bridge.json (vault dir). Get a free key at changenow.io.");
+      const providers = [changenowProvider({ apiKey: cfg.changenowApiKey })];
+      const ourPocket = deriveEvmAddress(vault.key);
+      let amountSats = a ? Number(a) : null;
+      if (amountSats === null) {
+        const usdc = await usdcBalanceOf(ourPocket);
+        const utxos = await defaultFetchUtxos(vault.address);
+        const bsvSats = utxos.reduce((s, u) => s + u.value, 0);
+        const plan = planRebalance({ usdcBalance: Number(usdc), bsvBalanceSats: bsvSats, thresholds: cfg.thresholds });
+        if (!plan) {
+          console.log(JSON.stringify({ ok: true, action: "none", reason: "USDC float above low-water or BSV float too small", usdc: usdc.toString(), bsvSats }, null, 2));
+          break;
+        }
+        amountSats = plan.fromAmountSats;
+      }
+      const logPath = vaultPaths(root).log;
+      const r = await executeRebalance({
+        bridge: vault.policy.bridge,
+        killfileOn: vault.policy.killfileOn,
+        usage: loadUsage(root, new Date(), "bridge-bsv"),
+        providers,
+        fromAmountSats: amountSats,
+        ourPocket,
+        send: async (to, sats) => {
+          const res = await sendRaw({ root, to, amount: sats });
+          if (!res.ok) throw new Error(res.message);
+          return { txid: res.txid };
+        },
+        logRow: (row) => appendFileSync(logPath, JSON.stringify(row) + "\n"),
+      });
+      console.log(JSON.stringify({ ok: true, ...r }, null, 2));
+      break;
+    }
+    case "bridge-status": {
+      if (!a) die("Usage: bridge-status <orderId>");
+      const { loadBridgeConfig, recordFinishedArrival } = await import("./bridge");
+      const { changenowProvider } = await import("./bridge-changenow");
+      const cfg = loadBridgeConfig(vaultPaths(root).bridge);
+      if (!cfg.changenowApiKey) die("REJECTED: no changenowApiKey in bridge.json (vault dir).");
+      const cn = changenowProvider({ apiKey: cfg.changenowApiKey });
+      const ord = await cn.status(a);
+      const logPath = vaultPaths(root).log;
+      const rows: Record<string, unknown>[] = existsSync(logPath)
+        ? readFileSync(logPath, "utf8").split(/\r?\n/).filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } })
+        : [];
+      const recorded = recordFinishedArrival(ord, rows);
+      if (recorded) appendFileSync(logPath, JSON.stringify(rows[rows.length - 1]) + "\n");
+      console.log(JSON.stringify({ ok: true, order: ord, arrivalLogged: recorded }, null, 2));
       break;
     }
     default:

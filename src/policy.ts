@@ -10,6 +10,8 @@ export type Policy = {
   killfileOn: boolean;
   /** Per-asset non-BSV pockets. Absent = DISABLED (fail-closed). */
   evm?: { usdc?: EvmAssetPolicy };
+  /** BSV<->USDC bridge conversions. Absent = DISABLED (fail-closed). */
+  bridge?: BridgePolicy;
 };
 
 export type Usage = {
@@ -39,6 +41,57 @@ export type EvmAssetPolicy = {
 };
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+// Bridge policy: BSV<->USDC conversions between our own vault and our own
+// pocket. Absent block = DISABLED (fail-closed). Amounts in sats.
+export type BridgePolicy = {
+  maxSatsPerSwap: number;
+  maxSatsPerDay: number | null;
+};
+
+export function evaluateBridgeSwap(
+  bridge: BridgePolicy | undefined,
+  killfileOn: boolean,
+  amountSats: number,
+  usage: Usage = { spentToday: 0, spentLifetime: 0 },
+): Decision {
+  if (!bridge) {
+    return {
+      ok: false,
+      code: "DISABLED",
+      message: "REJECTED: no bridge policy configured. Add a bridge block to policy.json to enable rebalancing.",
+    };
+  }
+  if (!Number.isInteger(amountSats) || amountSats <= 0 || !Number.isSafeInteger(amountSats)) {
+    return {
+      ok: false,
+      code: "BAD_AMOUNT",
+      message: `REJECTED: Swap amount must be a positive integer of satoshis (got ${String(amountSats)}).`,
+    };
+  }
+  if (killfileOn) {
+    return {
+      ok: false,
+      code: "KILL",
+      message: "REJECTED: Killfile STOP_SPENDING is on. Human must delete it to resume.",
+    };
+  }
+  if (amountSats > bridge.maxSatsPerSwap) {
+    return {
+      ok: false,
+      code: "CAP",
+      message: `REJECTED: Exceeds bridge cap of ${bridge.maxSatsPerSwap} sats/swap (requested ${amountSats}).`,
+    };
+  }
+  if (bridge.maxSatsPerDay !== null && usage.spentToday + amountSats > bridge.maxSatsPerDay) {
+    return {
+      ok: false,
+      code: "DAY",
+      message: `REJECTED: Exceeds bridge daily cap of ${bridge.maxSatsPerDay} sats (bridged ${usage.spentToday}, requested ${amountSats}).`,
+    };
+  }
+  return { ok: true };
+}
 
 export function isValidEvmAddress(address: string): boolean {
   return EVM_ADDRESS.test(address);

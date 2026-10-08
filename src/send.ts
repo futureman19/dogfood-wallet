@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { P2PKH, Transaction } from "@bsv/sdk";
-import { evaluateSend, evaluateSweep, evaluateSplit, planSplit, DEFAULT_SPLIT_PIECE } from "./policy";
+import { evaluateSend, evaluateSweep, evaluateSplit, planSplit, DEFAULT_SPLIT_PIECE, isValidAddress } from "./policy";
 import { loadUsage, loadVault, vaultPaths } from "./vault";
 import { gateAgentSend, loadPolicyEnvelope } from "./brc181";
 
@@ -171,6 +171,52 @@ export async function sendPayment(opts: {
     })}\n`,
   );
   return { ok: true, txid, amount: opts.amount, to: opts.to, fee };
+}
+
+// Raw transport: builds, signs and broadcasts a simple P2PKH payment with
+// change back to the vault. NO policy gate and NO spend log — the caller
+// authorizes and logs itself (the bridge does both under its own policy).
+export async function sendRaw(opts: {
+  root: string;
+  to: string;
+  amount: number;
+  fetchUtxos?: (address: string) => Promise<Utxo[]>;
+  fetchTxHex?: (txid: string) => Promise<string>;
+  broadcast?: (raw: string) => Promise<{ txid: string }>;
+}): Promise<{ ok: true; txid: string; fee: number } | { ok: false; code: string; message: string }> {
+  const vault = loadVault(opts.root);
+  if (!isValidAddress(opts.to)) {
+    return { ok: false, code: "BAD_ADDRESS", message: `REJECTED: Destination is not a mainnet P2PKH address (${opts.to}).` };
+  }
+  const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
+  const { chosen, fee, total } = selectUtxos(utxos, opts.amount);
+  if (chosen.length === 0 || total < opts.amount + fee) {
+    return {
+      ok: false,
+      code: "INSUFFICIENT",
+      message: `REJECTED: Insufficient funds (${total} sats available, need ${opts.amount + fee}).`,
+    };
+  }
+  const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
+  const tx = new Transaction();
+  for (const u of chosen) {
+    const hex = await fetchTxHex(u.tx_hash);
+    const source = Transaction.fromHex(hex);
+    tx.addInput({
+      sourceTransaction: source,
+      sourceTXID: u.tx_hash,
+      sourceOutputIndex: u.tx_pos,
+      unlockingScriptTemplate: new P2PKH().unlock(vault.key),
+    });
+  }
+  tx.addOutput({ satoshis: opts.amount, lockingScript: new P2PKH().lock(opts.to) });
+  const change = total - opts.amount - fee;
+  if (change > 1) {
+    tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(vault.address) });
+  }
+  await tx.sign();
+  const { txid } = await (opts.broadcast ?? defaultBroadcast)(tx.toHex());
+  return { ok: true, txid, fee };
 }
 
 export async function sweepPayment(opts: {

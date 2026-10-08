@@ -8,6 +8,7 @@ import {
   DEFAULT_MAX_SATS_PER_DAY,
   isValidAddress,
   usageFromLog,
+  type BridgePolicy,
   type EvmAssetPolicy,
   type Policy,
 } from "./policy";
@@ -24,6 +25,7 @@ export function vaultPaths(root: string) {
     policy: join(root, "policy.json"),
     kill: join(root, "STOP_SPENDING"),
     log: join(root, "spends.jsonl"),
+    bridge: join(root, "bridge.json"),
     brc181: join(root, "brc181.json"),
   };
 }
@@ -97,6 +99,19 @@ function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
     allowlist,
     killfileOn,
     evm: parseEvmBlock(parsed.evm),
+    bridge: parseBridgeBlock(parsed.bridge),
+  };
+}
+
+// Optional bridge block: {"bridge":{"maxSatsPerSwap":500000,"maxSatsPerDay":
+// null}}. Missing = bridge disabled. Present-but-empty = 500k sats/swap.
+function parseBridgeBlock(raw: unknown): BridgePolicy | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const b = raw as Record<string, unknown>;
+  return {
+    maxSatsPerSwap:
+      typeof b.maxSatsPerSwap === "number" && b.maxSatsPerSwap > 0 ? Math.floor(b.maxSatsPerSwap) : 500_000,
+    maxSatsPerDay: optionalCap(b.maxSatsPerDay),
   };
 }
 
