@@ -192,10 +192,13 @@ export function createMerchantApp(cfg: MerchantConfig): (req: Request) => Promis
     const settleBody = (await settleRes.json().catch(() => ({}))) as {
       success?: boolean;
       transaction?: string;
+      txHash?: string;
       error?: string;
+      errorReason?: string;
     };
     if (!settleRes.ok || settleBody.success !== true) {
-      return paymentRequired(baseUrl, `Settlement failed: ${settleBody.error ?? `HTTP ${settleRes.status}`}`);
+      const why = settleBody.errorReason ?? settleBody.error ?? `HTTP ${settleRes.status}`;
+      return paymentRequired(baseUrl, `Settlement failed: ${why}`);
     }
     seenNonces.add(nonceKey);
 
@@ -203,7 +206,7 @@ export function createMerchantApp(cfg: MerchantConfig): (req: Request) => Promis
     const receipt = Buffer.from(
       JSON.stringify({
         success: true,
-        transaction: settleBody.transaction ?? null,
+        transaction: settleBody.transaction ?? settleBody.txHash ?? null,
         network: cfg.network,
         payer: verdict.payer,
       }),
