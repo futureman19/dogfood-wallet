@@ -252,6 +252,16 @@ async function main() {
       await runHttp(root);
       break;
     }
+    case "delegator": {
+      const { runFeeDelegatorServer, defaultDelegatorDir } = await import("./fee-delegator");
+      const port = Number(b ?? process.env.DOGFOOD_DELEGATOR_PORT ?? 8403);
+      const srv = await runFeeDelegatorServer({ root: defaultDelegatorDir(), port });
+      console.log(
+        `Fee delegator listening on http://127.0.0.1:${srv.port} (pool ${srv.address}). POST /delegate/x402 {partial_tx}. Ctrl-C to stop.`,
+      );
+      await new Promise(() => {});
+      break;
+    }
     default:
       die(`Unknown command: ${cmd}\n${HELP}`);
   }

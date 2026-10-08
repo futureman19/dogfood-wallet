@@ -39,12 +39,13 @@ export type X402Funding = {
 };
 
 // Builds the client side of an x402 settlement: the vault funds the payment
-// with its own UTXOs (smallest-first), signed SIGHASH_ALL|FORKID|ANYONECANPAY
-// (0xC1) so the delegator can append fee inputs afterwards. The gateway's
+// with its own UTXOs (smallest-first), signed SIGHASH_SINGLE|FORKID|
+// ANYONECANPAY (0xC3) so the delegator can append fee inputs AND its own
+// change output afterwards without breaking client signatures. The gateway's
 // nonce input stays at index 0 — its pre-signed template script is committed
 // to output 0 via SIGHASH_SINGLE, so the payee output must remain first and
-// vault change comes after. The delegator covers the miner fee; the vault
-// pays exactly amount_sats (the rest returns as change).
+// vault change comes after (each client input's SINGLE pairs with the output
+// at its own index; the first payment input anchors the change output).
 export async function buildClientFundedPartialTx(opts: {
   challenge: X402Challenge;
   key: PrivateKey;
@@ -99,7 +100,7 @@ export async function buildClientFundedPartialTx(opts: {
       sourceTransaction: source,
       sourceTXID: u.tx_hash,
       sourceOutputIndex: u.tx_pos,
-      unlockingScriptTemplate: new P2PKH().unlock(opts.key, "all", true),
+      unlockingScriptTemplate: new P2PKH().unlock(opts.key, "single", true),
       sequence: 0xffffffff,
     });
   }

@@ -78,7 +78,7 @@ function challengeWithTemplate(): X402Challenge {
 }
 
 describe("buildClientFundedPartialTx", () => {
-  test("nonce input keeps the template script at index 0; vault input signed 0xC1; payee output at 0; change at 1", async () => {
+  test("nonce input keeps the template script at index 0; vault input signed 0xC3; payee output at 0; change at 1", async () => {
     const ch = challengeWithTemplate();
     const { partialTxHex, changeSats } = await buildClientFundedPartialTx({ challenge: ch, ...fundingFor([10_000]) });
     const tx = Transaction.fromHex(partialTxHex);
@@ -88,7 +88,7 @@ describe("buildClientFundedPartialTx", () => {
     expect(tx.inputs[0].unlockingScript?.toHex()).toBe(NONCE_SCRIPTSIG);
     const chunks = tx.inputs[1].unlockingScript!.chunks;
     const sig = chunks[0].data!;
-    expect(sig[sig.length - 1]).toBe(0xc1);
+    expect(sig[sig.length - 1]).toBe(0xc3);
     expect(tx.outputs[0].satoshis).toBe(ch.amount_sats);
     expect(tx.outputs[0].lockingScript.toHex()).toBe(ch.payee_locking_script_hex);
     expect(tx.outputs[1].satoshis).toBe(10_000 - ch.amount_sats);
