@@ -56,6 +56,11 @@ export async function settleBsvX402(opts: {
   onSpend?: (row: Record<string, unknown>) => void;
   policyEnvelope?: PolicyEnvelope | null;
   origin?: string;
+  /** Recent own bsv send txids (from the spend log). WoC's /unspent only
+   *  drops outputs spent by CONFIRMED txs, so our own mempool spends keep
+   *  showing as spendable; masking them here avoids building on dead coins.
+   *  Best-effort: the merchant's replay ledger remains the hard guard. */
+  ownSpendTxids?: string[];
 }): Promise<BsvSettleResult> {
   const fetchFn = opts.fetchFn ?? fetch;
   const first = await fetchFn(opts.url);
@@ -79,7 +84,18 @@ export async function settleBsvX402(opts: {
     }
     outpoints.add(outpoint);
   }
-  const { chosen, fee, total } = selectUtxos(utxos, req.satoshis);
+  const spentByUs = new Set<string>();
+  for (const txid of (opts.ownSpendTxids ?? []).slice(0, 10)) {
+    try {
+      const spentTx = Transaction.fromHex(await defaultFetchTxHex(txid, fetchFn));
+      if (spentTx.id("hex") !== txid) continue;
+      for (const i of spentTx.inputs) if (i.sourceTXID) spentByUs.add(`${i.sourceTXID}:${i.sourceOutputIndex}`);
+    } catch {
+      // Best-effort filter only: the merchant's replay ledger is the hard guard.
+    }
+  }
+  const liveUtxos = spentByUs.size ? utxos.filter((u) => !spentByUs.has(`${u.tx_hash}:${u.tx_pos}`)) : utxos;
+  const { chosen, fee, total } = selectUtxos(liveUtxos, req.satoshis);
   if (!Number.isSafeInteger(total) || !chosen.length || total < req.satoshis + fee) {
     throw new BsvX402Error("INSUFFICIENT", "REJECTED: insufficient BSV for payment and fee.");
   }

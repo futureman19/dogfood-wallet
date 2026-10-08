@@ -327,6 +327,17 @@ async function main() {
       if (!a) die("Usage: x402-pay <url>");
       const vault = loadVault(root);
       const { settleBsvX402, BsvX402Error } = await import("./bsv-x402");
+      // Recent own sends, so the client can mask WoC's confirmed-only unspent view.
+      const ownSpendTxids: string[] = [];
+      try {
+        const lines = readFileSync(vaultPaths(root).log, "utf8").trim().split("\n");
+        for (const line of lines.slice(-200)) {
+          try {
+            const row = JSON.parse(line) as { kind?: string; asset?: string; txid?: unknown };
+            if (row.kind === "send" && row.asset === "bsv" && typeof row.txid === "string") ownSpendTxids.push(row.txid);
+          } catch { /* ignore torn lines */ }
+        }
+      } catch { /* no log yet */ }
       try {
         const r = await settleBsvX402({
           url: a,
@@ -334,6 +345,7 @@ async function main() {
           from: vault.address,
           policy: vault.policy,
           usage: loadUsage(root, new Date(), "bsv"),
+          ownSpendTxids: ownSpendTxids.slice(-10),
           // Load the signed BSV policy only if a BSV requirement is offered.
           get policyEnvelope() {
             const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);

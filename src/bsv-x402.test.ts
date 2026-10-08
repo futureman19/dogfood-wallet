@@ -59,6 +59,62 @@ test("no bsv-direct entry is UNSUPPORTED without chain access", async () => {
   expect(calls).toBe(1);
 });
 
+test("masks stale WoC utxos that our own recent send already spent", async () => {
+  // WoC's /unspent only drops outputs spent by CONFIRMED txs. Our own mempool
+  // spend keeps showing as unspent; without masking we'd build on a dead coin
+  // and the merchant's replay ledger would (correctly) reject us.
+  const spentSource = new Transaction();
+  spentSource.addOutput({ satoshis: 1500, lockingScript: new P2PKH().lock(from) });
+  const freshSource = new Transaction();
+  freshSource.addOutput({ satoshis: 4000, lockingScript: new P2PKH().lock(from) });
+  const ownSpend = new Transaction();
+  ownSpend.addInput({ sourceTransaction: spentSource, sourceTXID: spentSource.id("hex"), sourceOutputIndex: 0, unlockingScriptTemplate: new P2PKH().unlock(key) });
+  ownSpend.addOutput({ satoshis: 4000, lockingScript: new P2PKH().lock(from) });
+  await ownSpend.sign();
+
+  const staleUtxos = [
+    { tx_hash: spentSource.id("hex"), tx_pos: 0, value: 1500 }, // stale: spent by ownSpend
+    { tx_hash: freshSource.id("hex"), tx_pos: 0, value: 4000 }, // live
+  ];
+  let paidHex = "";
+  const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(input);
+    if (u === url) {
+      const hdr = init?.headers ? new Headers(init.headers).get("X-BSV-PAYMENT") : null;
+      if (!hdr) return Response.json({ accepts: [requirement] }, { status: 402 });
+      paidHex = hdr;
+      return new Response("fortune", { status: 200, headers: { "X-PAYMENT-RESPONSE": Buffer.from(JSON.stringify({ success: true, transaction: Transaction.fromHex(hdr).id("hex"), network: "bsv-main" })).toString("base64") } });
+    }
+    if (u === `${woc}/address/${from}/unspent`) return Response.json(staleUtxos);
+    if (u === `${woc}/tx/${spentSource.id("hex")}/hex`) return new Response(spentSource.toHex());
+    if (u === `${woc}/tx/${freshSource.id("hex")}/hex`) return new Response(freshSource.toHex());
+    if (u === `${woc}/tx/${ownSpend.id("hex")}/hex`) return new Response(ownSpend.toHex());
+    throw new Error(`Unexpected network: ${u}`);
+  }) as typeof fetch;
+
+  const r = await settleBsvX402({ ...opts, ownSpendTxids: [ownSpend.id("hex")], fetchFn });
+  expect(r.ok).toBe(true);
+  const paidTx = Transaction.fromHex(paidHex);
+  expect(paidTx.inputs.map((i) => `${i.sourceTXID}:${i.sourceOutputIndex}`)).toEqual([`${freshSource.id("hex")}:0`]);
+});
+
+test("stale-mask is best-effort: an unfetchable own spend still settles", async () => {
+  const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(input);
+    if (u === url) {
+      const hdr = init?.headers ? new Headers(init.headers).get("X-BSV-PAYMENT") : null;
+      if (!hdr) return Response.json({ accepts: [requirement] }, { status: 402 });
+      return new Response("fortune", { status: 200, headers: { "X-PAYMENT-RESPONSE": Buffer.from(JSON.stringify({ success: true, transaction: Transaction.fromHex(hdr).id("hex"), network: "bsv-main" })).toString("base64") } });
+    }
+    if (u === `${woc}/address/${from}/unspent`) return Response.json(utxos);
+    if (u === `${woc}/tx/${sourceId}/hex`) return new Response(source.toHex());
+    if (u === `${woc}/tx/${"f".repeat(64)}/hex`) return new Response("not found", { status: 404 });
+    throw new Error(`Unexpected network: ${u}`);
+  }) as typeof fetch;
+  const r = await settleBsvX402({ ...opts, ownSpendTxids: ["f".repeat(64)], fetchFn });
+  expect(r.ok).toBe(true);
+});
+
 for (const satoshis of [0, -1, 1.5, "500", Number.MAX_SAFE_INTEGER + 1]) {
   test(`malformed BSV price ${satoshis} refuses rather than falling through`, async () => {
     await expect(settleBsvX402({ ...opts, fetchFn: (async () => Response.json({ accepts: [{ ...requirement, satoshis }] }, { status: 402 })) as typeof fetch })).rejects.toMatchObject({ code: "BAD_AMOUNT" });
