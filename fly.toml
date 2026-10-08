@@ -1,6 +1,12 @@
 app = "dogfood-merchant"
 primary_region = "iad"
 
+# Single writer: the replay ledger lives on one volume. Rolling strategy so
+# deploys never spin up a second (volume-less) machine.
+[deploy]
+  strategy = "rolling"
+  max_unavailable = 0
+
 [build]
   dockerfile = "Dockerfile.merchant"
 
