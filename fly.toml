@@ -1,0 +1,18 @@
+app = "dogfood-merchant"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile.merchant"
+
+[env]
+  DOGFOOD_MERCHANT_PAYTO = "0x3285Bb4b72eCa1d2955928Fb8437Ac7ED167abdd"
+  DOGFOOD_MERCHANT_NETWORK = "base-sepolia"
+  DOGFOOD_FACILITATOR_URL = "https://x402.org/facilitator"
+  DOGFOOD_MERCHANT_PRICE = "1000"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0

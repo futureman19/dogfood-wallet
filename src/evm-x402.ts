@@ -1,5 +1,5 @@
 import type { PrivateKey } from "@bsv/sdk";
-import { buildX402PaymentHeader, USDC_BASE, type X402ExactRequirement } from "./evm";
+import { buildX402PaymentHeader, USDC_BASE, USDC_BASE_SEPOLIA, type X402ExactRequirement } from "./evm";
 import { evaluateEvmSend, type EvmAssetPolicy, type Usage } from "./policy";
 
 // Coinbase x402 (`exact` scheme, EIP-3009) settlement for the EVM pocket.
@@ -19,18 +19,21 @@ export class UsdcX402Error extends Error {
 export function pickExactBaseUsdc(body: unknown): X402ExactRequirement | null {
   const accepts = (body as { accepts?: unknown })?.accepts;
   if (!Array.isArray(accepts)) return null;
+  const assets: Record<string, string> = { base: USDC_BASE, "base-sepolia": USDC_BASE_SEPOLIA };
   for (const a of accepts as Record<string, unknown>[]) {
+    const network = typeof a?.network === "string" ? a.network : "";
+    const expectedAsset = assets[network];
     if (
       a?.scheme === "exact" &&
-      a?.network === "base" &&
+      expectedAsset &&
       typeof a?.maxAmountRequired === "string" &&
       typeof a?.payTo === "string" &&
       typeof a?.asset === "string" &&
-      (a.asset as string).toLowerCase() === USDC_BASE.toLowerCase()
+      (a.asset as string).toLowerCase() === expectedAsset.toLowerCase()
     ) {
       return {
         scheme: "exact",
-        network: "base",
+        network,
         maxAmountRequired: a.maxAmountRequired as string,
         payTo: a.payTo as string,
         asset: a.asset as string,

@@ -1,5 +1,5 @@
 import { getAddress, recoverTypedDataAddress } from "viem";
-import { evmTransferAuthorizationTypes, USDC_BASE } from "./evm";
+import { evmTransferAuthorizationTypes, USDC_BASE, USDC_BASE_SEPOLIA } from "./evm";
 
 // The cash register: a Coinbase-x402 (`exact`) merchant endpoint that
 // accepts USDC straight into the vault's EVM pocket. "Any coin in" starts
@@ -16,7 +16,6 @@ export class MerchantError extends Error {
   }
 }
 
-export const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 const CHAIN_IDS: Record<string, number> = { base: 8453, "base-sepolia": 84532 };
 
 export type MerchantConfig = {

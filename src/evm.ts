@@ -2,14 +2,19 @@ import { createPublicClient, getAddress, http, parseAbi } from "viem";
 import { base } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import type { PrivateKey } from "@bsv/sdk";
-
 // The EVM pocket: same secret as the BSV vault key, second identity.
 // secp256k1 is shared by both chains, so no new key file exists — the EVM
 // address is derived on demand from the decrypted vault key.
 
 export const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+export const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 export const BASE_CHAIN_ID = 8453;
+export const BASE_SEPOLIA_CHAIN_ID = 84532;
 export const BASE_RPC = "https://mainnet.base.org";
+
+export function chainIdForNetwork(network: string): number {
+  return network === "base-sepolia" ? BASE_SEPOLIA_CHAIN_ID : BASE_CHAIN_ID;
+}
 
 function keyToHex(key: PrivateKey): `0x${string}` {
   return `0x${key.toHex()}` as `0x${string}`;
@@ -107,7 +112,7 @@ export async function buildX402PaymentHeader(opts: {
     domain: {
       name: opts.requirement.extra?.name ?? "USD Coin",
       version: opts.requirement.extra?.version ?? "2",
-      chainId: BASE_CHAIN_ID,
+      chainId: chainIdForNetwork(opts.requirement.network),
       verifyingContract: opts.requirement.asset,
     },
     authorization,
