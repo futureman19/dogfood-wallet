@@ -103,6 +103,29 @@ Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-25
 
 `x402-delegate` POSTs `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402` (Merkle Works wire format), then builds `X402-Proof`. Unset URL → `NEED_DELEGATOR` (no fetch, no demo host). Policy still gates the payee. Broadcast is **off** unless `--broadcast` or `DOGFOOD_X402_BROADCAST=1` (uses the same GorillaPool ARC path as `send`). The merchant nonce UTXO is theirs; Dogfood does not spend local vault coins on it.
 
+## Direct BSV payments over HTTP 402
+
+`bun src/cli.ts x402-pay <url>` tries **BSV sats → Base USDC → Solana USDC**. It switches rails only on `UNSUPPORTED`, never after a policy, funding, or settlement refusal. BSV uses the normal per-transaction/day/lifetime caps, killfile, destination allowlist, and optional BRC-181 envelope. Successful receipts produce `kind: "send", asset: "bsv"` spend-log rows.
+
+The merchant's `/v1/fortune` can offer BSV alongside its existing USDC requirement:
+
+- `DOGFOOD_MERCHANT_BSV_PAYTO`: public mainnet P2PKH address; unset omits the BSV option.
+- `DOGFOOD_MERCHANT_BSV_SATS`: positive integer price, default `500`.
+- `DOGFOOD_MERCHANT_PAYTO`: public EVM address; required by `merchant-main.ts`. The local CLI uses this when set, otherwise derives the existing EVM payee from the vault.
+
+```sh
+DOGFOOD_MERCHANT_PAYTO=0x4242424242424242424242424242424242424242 \
+DOGFOOD_MERCHANT_BSV_PAYTO=1M5aSsbBEXhPFSj4QUikCaZ2GQmf7TRwFN \
+bun src/cli.ts merchant 8410
+curl -i http://127.0.0.1:8410/v1/fortune
+```
+
+The 402 advertises `{ scheme: "bsv-direct", network: "bsv-main", satoshis: 500, payTo }` and `x-bsv-payment-satoshis-required` / `x-bsv-payment-address` headers. A paid retry sends the full signed transaction hex in `X-BSV-PAYMENT`. This is a simplified **BRC-0121-flavored dialect**, not full compliance: plain addresses, no BRC-42 key derivation.
+
+The keyless merchant checks payment outputs and every input against WoC source transactions and unspent outputs, guards txid replay in-process, then broadcasts through the existing ARC helper (WoC fallback only for fee-policy rejection). It deliberately accepts **0-conf** for this sub-cent endpoint; unspent checks do not eliminate double-spend risk. Replay memory is process-local, not a shared durable ledger. A successful `X-PAYMENT-RESPONSE` identifies the transaction and `bsv-main` network. The client requires a matching success receipt and never independently broadcasts or automatically retries on ambiguous settlement.
+
+For the self-payment loop, a human must first allow the vault's own BSV address in its BSV policy. No policy changes or live payment are performed by the tests. Tests inject all chain/broadcast fetchers and use synthetic funding transactions with real signatures.
+
 ## BRC-0204 (script + descriptor, not a live allowance)
 
 [BRC-0204](https://bsv.brc.dev/wallet/0204) is a two-branch lock: the agent spends with `OP_1`, the owner sweeps with `OP_0`, plus a 1-sat revocation output. Dogfood **funds and owner-sweeps** that shape. Locking keys are Type42-derived (`protocolID` `[2, "agent allowance"]`, `keyID` = `allowanceId`, counterparty = agent identity). The vault key is the owner **identity**, not the key on the lock. Fund also issues a BRC-52 core certificate (type = SHA-256 of `agent allowance`) signed by the owner, bound to the revocation outpoint. Field revelation keyring stays on disk; it is not printed. `proveAllowanceCertificate` (library, not CLI) lets an **agent `ProtoWallet`** reveal selected fields to a verifier. Never pass an agent WIF on a CLI.

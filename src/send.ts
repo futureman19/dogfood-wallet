@@ -13,15 +13,15 @@ export type SendResult =
 const WOC = "https://api.whatsonchain.com/v1/bsv/main";
 const ARC_URL = "https://arc.gorillapool.io/v1/tx";
 
-export async function defaultFetchUtxos(address: string): Promise<Utxo[]> {
-  const response = await fetch(`${WOC}/address/${address}/unspent`);
+export async function defaultFetchUtxos(address: string, fetchFn: typeof fetch = fetch): Promise<Utxo[]> {
+  const response = await fetchFn(`${WOC}/address/${address}/unspent`);
   if (!response.ok) throw new Error(`UTXO fetch failed: ${response.status}`);
   const data = await response.json();
   return Array.isArray(data) ? data : [];
 }
 
-export async function defaultFetchTxHex(txid: string): Promise<string> {
-  const response = await fetch(`${WOC}/tx/${txid}/hex`);
+export async function defaultFetchTxHex(txid: string, fetchFn: typeof fetch = fetch): Promise<string> {
+  const response = await fetchFn(`${WOC}/tx/${txid}/hex`);
   if (!response.ok) throw new Error(`Tx hex fetch failed: ${response.status}`);
   return (await response.text()).trim();
 }
@@ -38,8 +38,11 @@ async function arcBroadcast(raw: string, fetchFn: typeof fetch): Promise<{ txid:
   });
   const body = await response.text();
   if (!response.ok) throw new Error(`Broadcast failed: ${response.status} ${body}`);
-  const parsed = JSON.parse(body) as { txid?: string };
-  if (!parsed.txid) throw new Error(`Broadcast failed: ${body}`);
+  const parsed = JSON.parse(body) as { txid?: string; txStatus?: string; status?: number };
+  // ARC may report transaction rejection in a successful HTTP response.
+  if (!parsed.txid || parsed.txStatus === "REJECTED" || parsed.txStatus === "DOUBLE_SPEND_ATTEMPTED" || (parsed.status !== undefined && parsed.status >= 400)) {
+    throw new Error(`Broadcast failed: ${body}`);
+  }
   return { txid: parsed.txid };
 }
 

@@ -326,6 +326,28 @@ async function main() {
     case "x402-pay": {
       if (!a) die("Usage: x402-pay <url>");
       const vault = loadVault(root);
+      const { settleBsvX402, BsvX402Error } = await import("./bsv-x402");
+      try {
+        const r = await settleBsvX402({
+          url: a,
+          key: vault.key,
+          from: vault.address,
+          policy: vault.policy,
+          usage: loadUsage(root, new Date(), "bsv"),
+          // Load the signed BSV policy only if a BSV requirement is offered.
+          get policyEnvelope() {
+            const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
+            if (!loaded.ok) throw new BsvX402Error(loaded.code, loaded.message);
+            return loaded.envelope;
+          },
+          onSpend: (row) => appendFileSync(vaultPaths(root).log, JSON.stringify(row) + "\n"),
+        });
+        console.log(JSON.stringify(r, null, 2));
+        break;
+      } catch (e) {
+        // Policy, funding, and settlement failures never switch currencies.
+        if (!(e instanceof BsvX402Error) || e.code !== "UNSUPPORTED") throw e;
+      }
       const { deriveEvmAddress } = await import("./evm");
       const { settleUsdcX402, UsdcX402Error } = await import("./evm-x402");
       try {
@@ -430,15 +452,18 @@ async function main() {
       break;
     }
     case "merchant": {
-      const vault = loadVault(root);
       const { deriveEvmAddress } = await import("./evm");
       const { createMerchantApp } = await import("./merchant");
+      // Explicit public env addresses allow local verification without loading any key.
+      const payTo = process.env.DOGFOOD_MERCHANT_PAYTO ?? deriveEvmAddress(loadVault(root).key);
       const port = Number(a ?? process.env.DOGOOD_MERCHANT_PORT ?? 8404);
       const network = process.env.DOGFOOD_MERCHANT_NETWORK ?? "base-sepolia";
       const facilitatorUrl = process.env.DOGFOOD_FACILITATOR_URL ?? "https://x402.org/facilitator";
       const priceBaseUnits = Number(process.env.DOGFOOD_MERCHANT_PRICE ?? 1_000);
       const app = createMerchantApp({
-        payTo: deriveEvmAddress(vault.key),
+        payTo,
+        bsvPayTo: process.env.DOGFOOD_MERCHANT_BSV_PAYTO,
+        bsvSatoshis: Number(process.env.DOGFOOD_MERCHANT_BSV_SATS ?? 500),
         priceBaseUnits,
         resourcePath: "/v1/fortune",
         facilitatorUrl,

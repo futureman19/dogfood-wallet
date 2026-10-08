@@ -1,4 +1,5 @@
 import { getAddress, recoverTypedDataAddress } from "viem";
+import { createBsvMerchant } from "./merchant-bsv";
 import { evmTransferAuthorizationTypes, USDC_BASE, USDC_BASE_SEPOLIA } from "./evm";
 
 // The cash register: a Coinbase-x402 (`exact`) merchant endpoint that
@@ -25,6 +26,9 @@ export type MerchantConfig = {
   facilitatorUrl: string;
   network: string;
   facilitatorFetch?: typeof fetch;
+  bsvPayTo?: string;
+  bsvSatoshis?: number;
+  fetchFn?: typeof fetch;
 };
 
 export type PaymentRequirement = {
@@ -148,13 +152,17 @@ const FORTUNES = [
 ];
 
 export function createMerchantApp(cfg: MerchantConfig): (req: Request) => Promise<Response> {
+  const bsv = createBsvMerchant(cfg);
   const facilitatorFetch = cfg.facilitatorFetch ?? fetch;
   const seenNonces = new Set<string>(); // fast-path replay guard; the USDC contract is the hard guard
 
   function paymentRequired(baseUrl: string, error?: string): Response {
     return Response.json(
-      { x402Version: 1, error: error ?? "Payment required", accepts: [buildUsdcRequirement(cfg, baseUrl)] },
-      { status: 402 },
+      { x402Version: 1, error: error ?? "Payment required", accepts: [buildUsdcRequirement(cfg, baseUrl), ...(bsv ? [bsv.requirement] : [])] },
+      { status: 402, headers: bsv ? {
+        "x-bsv-payment-satoshis-required": String(bsv.requirement.satoshis),
+        "x-bsv-payment-address": bsv.requirement.payTo,
+      } : {} },
     );
   }
 
@@ -166,6 +174,21 @@ export function createMerchantApp(cfg: MerchantConfig): (req: Request) => Promis
     }
     if (req.method !== "GET" || url.pathname !== cfg.resourcePath) {
       return Response.json({ error: "NOT_FOUND" }, { status: 404 });
+    }
+
+    const bsvHeader = req.headers.get("X-BSV-PAYMENT");
+    if (bsvHeader !== null) {
+      if (!bsv) return paymentRequired(baseUrl, "BSV payments are not enabled");
+      try {
+        const txid = await bsv.settle(bsvHeader);
+        const receipt = Buffer.from(JSON.stringify({ success: true, transaction: txid, network: "bsv-main" })).toString("base64");
+        return Response.json(
+          { fortune: FORTUNES[Math.floor(Math.random() * FORTUNES.length)], price: bsv.requirement.satoshis, asset: "BSV" },
+          { status: 200, headers: { "X-PAYMENT-RESPONSE": receipt } },
+        );
+      } catch (err) {
+        return paymentRequired(baseUrl, `BSV payment invalid: ${err instanceof Error ? err.message : "settlement failed"}`);
+      }
     }
 
     const header = req.headers.get("X-PAYMENT");

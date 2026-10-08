@@ -20,6 +20,8 @@ const app = createMerchantApp({
   resourcePath: "/v1/fortune",
   facilitatorUrl,
   network,
+  bsvPayTo: process.env.DOGFOOD_MERCHANT_BSV_PAYTO,
+  bsvSatoshis: Number(process.env.DOGFOOD_MERCHANT_BSV_SATS ?? 500),
 });
 
 Bun.serve({ port, hostname: "0.0.0.0", fetch: app });
