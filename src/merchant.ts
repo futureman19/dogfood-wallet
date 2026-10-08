@@ -1,6 +1,7 @@
 import { getAddress, recoverTypedDataAddress } from "viem";
 import { createBsvMerchant } from "./merchant-bsv";
 import { evmTransferAuthorizationTypes, USDC_BASE, USDC_BASE_SEPOLIA } from "./evm";
+import type { ReplayStore } from "./replay-store";
 
 // The cash register: a Coinbase-x402 (`exact`) merchant endpoint that
 // accepts USDC straight into the vault's EVM pocket. "Any coin in" starts
@@ -29,6 +30,7 @@ export type MerchantConfig = {
   bsvPayTo?: string;
   bsvSatoshis?: number;
   fetchFn?: typeof fetch;
+  replayStore?: ReplayStore;
 };
 
 export type PaymentRequirement = {

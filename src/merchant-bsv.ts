@@ -1,10 +1,11 @@
 import { P2PKH, Transaction } from "@bsv/sdk";
 import { isValidAddress } from "./policy";
+import { createMemoryReplayStore, type ReplayStore } from "./replay-store";
 import { defaultBroadcast } from "./send";
 import { p2pkhAddressFromLock } from "./x402";
 
 const WOC = "https://api.whatsonchain.com/v1/bsv/main";
-export type BsvMerchantConfig = { bsvPayTo?: string; bsvSatoshis?: number; fetchFn?: typeof fetch };
+export type BsvMerchantConfig = { bsvPayTo?: string; bsvSatoshis?: number; fetchFn?: typeof fetch; replayStore?: ReplayStore };
 
 // Single-process replay protection. Keep reservations after broadcast attempts:
 // a timeout is ambiguous and must not permit a second delivery of the resource.
@@ -16,8 +17,7 @@ export function createBsvMerchant(cfg: BsvMerchantConfig) {
   const requirement = { scheme: "bsv-direct", network: "bsv-main", satoshis, payTo: cfg.bsvPayTo } as const;
   const lockingHex = new P2PKH().lock(cfg.bsvPayTo).toHex();
   const fetchFn = cfg.fetchFn ?? globalThis.fetch.bind(globalThis);
-  const reservedTransactions = new Set<string>();
-  const reservedOutpoints = new Set<string>();
+  const store = cfg.replayStore ?? createMemoryReplayStore();
 
   async function settle(raw: string): Promise<string> {
     if (!/^(?:[a-fA-F0-9]{2})+$/.test(raw)) throw new Error("Invalid BSV payment hex");
@@ -63,9 +63,8 @@ export function createBsvMerchant(cfg: BsvMerchantConfig) {
     if (outputTotal > inputTotal) throw new Error("BSV inflation: outputs exceed inputs");
     // Check and reserve synchronously after chain validation and before broadcast.
     // No await between these operations: concurrent copies/conflicting txids cannot both pass.
-    if (reservedTransactions.has(txid) || outpoints.some(p => reservedOutpoints.has(p))) throw new Error("BSV payment replay: transaction or input already used");
-    reservedTransactions.add(txid);
-    outpoints.forEach(p => reservedOutpoints.add(p));
+    if (store.has(txid, outpoints)) throw new Error("BSV payment replay: transaction or input already used");
+    store.reserve(txid, outpoints);
     const result = await defaultBroadcast(raw, fetchFn);
     if (result.txid.toLowerCase() !== txid) throw new Error("BSV broadcast txid mismatch");
     return txid;

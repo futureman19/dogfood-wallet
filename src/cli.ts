@@ -460,10 +460,13 @@ async function main() {
       const network = process.env.DOGFOOD_MERCHANT_NETWORK ?? "base-sepolia";
       const facilitatorUrl = process.env.DOGFOOD_FACILITATOR_URL ?? "https://x402.org/facilitator";
       const priceBaseUnits = Number(process.env.DOGFOOD_MERCHANT_PRICE ?? 1_000);
+      const statePath = process.env.DOGFOOD_MERCHANT_STATE;
+      const { createFileReplayStore } = await import("./replay-store");
       const app = createMerchantApp({
         payTo,
         bsvPayTo: process.env.DOGFOOD_MERCHANT_BSV_PAYTO,
         bsvSatoshis: Number(process.env.DOGFOOD_MERCHANT_BSV_SATS ?? 500),
+        replayStore: statePath ? createFileReplayStore(statePath) : undefined,
         priceBaseUnits,
         resourcePath: "/v1/fortune",
         facilitatorUrl,

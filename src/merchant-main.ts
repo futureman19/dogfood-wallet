@@ -2,6 +2,7 @@
 // keys: the payee is a plain address from env. Local runs use the CLI
 // `merchant` command instead, which derives payTo from the vault key.
 import { createMerchantApp } from "./merchant";
+import { createFileReplayStore } from "./replay-store";
 
 const payTo = process.env.DOGFOOD_MERCHANT_PAYTO;
 if (!payTo) {
@@ -13,6 +14,8 @@ const port = Number(process.env.PORT ?? 8080);
 const network = process.env.DOGFOOD_MERCHANT_NETWORK ?? "base-sepolia";
 const facilitatorUrl = process.env.DOGFOOD_FACILITATOR_URL ?? "https://x402.org/facilitator";
 const priceBaseUnits = Number(process.env.DOGFOOD_MERCHANT_PRICE ?? 1_000);
+// Point at a durable path (fly volume) to survive machine restarts.
+const statePath = process.env.DOGFOOD_MERCHANT_STATE;
 
 const app = createMerchantApp({
   payTo,
@@ -22,7 +25,8 @@ const app = createMerchantApp({
   network,
   bsvPayTo: process.env.DOGFOOD_MERCHANT_BSV_PAYTO,
   bsvSatoshis: Number(process.env.DOGFOOD_MERCHANT_BSV_SATS ?? 500),
+  replayStore: statePath ? createFileReplayStore(statePath) : undefined,
 });
 
 Bun.serve({ port, hostname: "0.0.0.0", fetch: app });
-console.log(`dogfood-merchant on :${port} (${network}, ${priceBaseUnits} units/call, payTo ${payTo})`);
+console.log(`dogfood-merchant on :${port} (${network}, ${priceBaseUnits} units/call, payTo ${payTo}, replay ${statePath ?? "memory"})`);
