@@ -103,7 +103,9 @@ export async function buildX402PaymentHeader(opts: {
     from: opts.from,
     to: opts.requirement.payTo,
     value: opts.requirement.maxAmountRequired,
-    validAfter: String(now),
+    // x402 convention: validAfter = 0. A "now" value races block timestamps
+    // (facilitator reverts with "authorization is not yet valid" on skew).
+    validAfter: "0",
     validBefore: String(now + (opts.validitySeconds ?? 3600)),
     nonce,
   };

@@ -85,7 +85,7 @@ describe("buildX402PaymentHeader", () => {
       from: ADDR_ONE,
       to: "0x209693Bc6afc0C5328bA36FaF03C18EF3122C5EA",
       value: "10000",
-      validAfter: "1700000000",
+      validAfter: "0",
       validBefore: "1700003600",
       nonce: "0x" + "cd".repeat(32),
     });
