@@ -9,6 +9,8 @@ primary_region = "iad"
   DOGFOOD_MERCHANT_NETWORK = "base-sepolia"
   DOGFOOD_FACILITATOR_URL = "https://x402.org/facilitator"
   DOGFOOD_MERCHANT_PRICE = "1000"
+  DOGFOOD_MERCHANT_BSV_PAYTO = "1M5aSsbBEXhPFSj4QUikCaZ2GQmf7TRwFN"
+  DOGFOOD_MERCHANT_BSV_SATS = "500"
 
 [http_service]
   internal_port = 8080
