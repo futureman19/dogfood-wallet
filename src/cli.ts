@@ -37,6 +37,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts bridge-quote <sats>
   bun src/cli.ts bridge-rebalance [sats]
   bun src/cli.ts bridge-status <orderId>
+  bun src/cli.ts merchant [port]
   bun src/cli.ts allowance-script <agent-pubkey-hex> <owner-pubkey-hex>
   bun src/cli.ts allowance-inspect <descriptor-json-or-file>
   bun src/cli.ts allowance-fund <agent-pubkey-hex> <sats> [pieces]
@@ -383,6 +384,26 @@ async function main() {
       const recorded = recordFinishedArrival(ord, rows);
       if (recorded) appendFileSync(logPath, JSON.stringify(rows[rows.length - 1]) + "\n");
       console.log(JSON.stringify({ ok: true, order: ord, arrivalLogged: recorded }, null, 2));
+      break;
+    }
+    case "merchant": {
+      const vault = loadVault(root);
+      const { deriveEvmAddress } = await import("./evm");
+      const { createMerchantApp } = await import("./merchant");
+      const port = Number(a ?? process.env.DOGOOD_MERCHANT_PORT ?? 8404);
+      const network = process.env.DOGFOOD_MERCHANT_NETWORK ?? "base-sepolia";
+      const facilitatorUrl = process.env.DOGFOOD_FACILITATOR_URL ?? "https://x402.org/facilitator";
+      const priceBaseUnits = Number(process.env.DOGFOOD_MERCHANT_PRICE ?? 1_000);
+      const app = createMerchantApp({
+        payTo: deriveEvmAddress(vault.key),
+        priceBaseUnits,
+        resourcePath: "/v1/fortune",
+        facilitatorUrl,
+        network,
+      });
+      Bun.serve({ port, hostname: "0.0.0.0", fetch: app });
+      console.log(`Merchant listening on :${port} (${network}, $${priceBaseUnits / 1e6}/call, payTo vault pocket). Ctrl-C to stop.`);
+      await new Promise(() => {});
       break;
     }
     default:
