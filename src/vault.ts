@@ -99,6 +99,7 @@ function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
     allowlist,
     killfileOn,
     evm: parseEvmBlock(parsed.evm),
+    solana: parseEvmBlock(parsed.solana), // same pocket shape, solana.usdc key
     bridge: parseBridgeBlock(parsed.bridge),
   };
 }

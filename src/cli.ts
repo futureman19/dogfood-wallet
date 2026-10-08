@@ -32,6 +32,8 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts x402-delegate <X402-Challenge-header> [method] [path] [--broadcast]
   bun src/cli.ts evm-address
   bun src/cli.ts evm-balance
+  bun src/cli.ts sol-address
+  bun src/cli.ts sol-balance [--devnet]
   bun src/cli.ts x402-pay <url>
   bun src/cli.ts delegator [port]
   bun src/cli.ts bridge-quote <sats>
@@ -297,21 +299,62 @@ async function main() {
       );
       break;
     }
+    case "sol-address": {
+      const { deriveSolanaAddress } = await import("./solana");
+      console.log(deriveSolanaAddress(loadVault(root).key));
+      break;
+    }
+    case "sol-balance": {
+      const { deriveSolanaAddress, solanaUsdcBalance, USDC_SOLANA, USDC_SOLANA_DEVNET, SOLANA_RPC, SOLANA_DEVNET_RPC } =
+        await import("./solana");
+      const devnet = process.argv.includes("--devnet");
+      const address = deriveSolanaAddress(loadVault(root).key);
+      const bal = await solanaUsdcBalance({
+        address,
+        mint: devnet ? USDC_SOLANA_DEVNET : USDC_SOLANA,
+        rpcUrl: devnet ? SOLANA_DEVNET_RPC : SOLANA_RPC,
+      });
+      console.log(
+        JSON.stringify(
+          { network: devnet ? "solana-devnet" : "solana", address, usdcBaseUnits: bal.toString(), usdc: (Number(bal) / 1e6).toFixed(6) },
+          null,
+          2,
+        ),
+      );
+      break;
+    }
     case "x402-pay": {
       if (!a) die("Usage: x402-pay <url>");
       const vault = loadVault(root);
       const { deriveEvmAddress } = await import("./evm");
-      const { settleUsdcX402 } = await import("./evm-x402");
-      const r = await settleUsdcX402({
-        url: a,
-        key: vault.key,
-        from: deriveEvmAddress(vault.key),
-        pocket: vault.policy.evm?.usdc,
-        killfileOn: vault.policy.killfileOn,
-        usage: loadUsage(root, new Date(), "usdc-base"),
-        onSpend: (row) => appendFileSync(vaultPaths(root).log, JSON.stringify(row) + "\n"),
-      });
-      console.log(JSON.stringify(r, null, 2));
+      const { settleUsdcX402, UsdcX402Error } = await import("./evm-x402");
+      try {
+        const r = await settleUsdcX402({
+          url: a,
+          key: vault.key,
+          from: deriveEvmAddress(vault.key),
+          pocket: vault.policy.evm?.usdc,
+          killfileOn: vault.policy.killfileOn,
+          usage: loadUsage(root, new Date(), "usdc-base"),
+          onSpend: (row) => appendFileSync(vaultPaths(root).log, JSON.stringify(row) + "\n"),
+        });
+        console.log(JSON.stringify(r, null, 2));
+      } catch (e) {
+        // No base/USDC requirement offered? Try the Solana pocket before failing.
+        if (!(e instanceof UsdcX402Error) || e.code !== "UNSUPPORTED") throw e;
+        const { deriveSolanaAddress } = await import("./solana");
+        const { settleSolanaX402 } = await import("./solana-x402");
+        const r = await settleSolanaX402({
+          url: a,
+          key: vault.key,
+          from: deriveSolanaAddress(vault.key),
+          pocket: vault.policy.solana?.usdc,
+          killfileOn: vault.policy.killfileOn,
+          usage: loadUsage(root, new Date(), "usdc-solana"),
+          onSpend: (row) => appendFileSync(vaultPaths(root).log, JSON.stringify(row) + "\n"),
+        });
+        console.log(JSON.stringify(r, null, 2));
+      }
       break;
     }
     case "bridge-quote": {

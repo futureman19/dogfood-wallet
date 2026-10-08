@@ -10,6 +10,7 @@ export type Policy = {
   killfileOn: boolean;
   /** Per-asset non-BSV pockets. Absent = DISABLED (fail-closed). */
   evm?: { usdc?: EvmAssetPolicy };
+  solana?: { usdc?: EvmAssetPolicy };
   /** BSV<->USDC bridge conversions. Absent = DISABLED (fail-closed). */
   bridge?: BridgePolicy;
 };
@@ -97,18 +98,25 @@ export function isValidEvmAddress(address: string): boolean {
   return EVM_ADDRESS.test(address);
 }
 
-export function evaluateEvmSend(
+const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+export function isValidSolanaAddress(address: string): boolean {
+  return BASE58.test(address);
+}
+
+function evaluatePocket(
   pocket: EvmAssetPolicy | undefined,
   killfileOn: boolean,
   amount: number,
   to: string,
-  usage: Usage = { spentToday: 0, spentLifetime: 0 },
+  usage: Usage,
+  opts: { name: string; validPayee: (to: string) => boolean; payeeHint: string },
 ): Decision {
   if (!pocket) {
     return {
       ok: false,
       code: "DISABLED",
-      message: "REJECTED: no USDC pocket configured. Add an evm.usdc block to policy.json to enable it.",
+      message: `REJECTED: no USDC pocket configured. Add an ${opts.name} block to policy.json to enable it.`,
     };
   }
   if (!Number.isInteger(amount) || amount <= 0 || !Number.isSafeInteger(amount)) {
@@ -125,8 +133,8 @@ export function evaluateEvmSend(
       message: "REJECTED: Killfile STOP_SPENDING is on. Human must delete it to resume.",
     };
   }
-  if (!isValidEvmAddress(to)) {
-    return { ok: false, code: "BAD_ADDRESS", message: `REJECTED: Payee is not a 0x EVM address (got ${to}).` };
+  if (!opts.validPayee(to)) {
+    return { ok: false, code: "BAD_ADDRESS", message: `REJECTED: Payee is not a ${opts.payeeHint} (got ${to}).` };
   }
   if (amount > pocket.maxPerTx) {
     return {
@@ -136,11 +144,7 @@ export function evaluateEvmSend(
     };
   }
   if (pocket.allowlist !== null && !pocket.allowlist.some((a) => a.toLowerCase() === to.toLowerCase())) {
-    return {
-      ok: false,
-      code: "ALLOWLIST",
-      message: `REJECTED: Payee ${to} is not on the USDC pocket allowlist.`,
-    };
+    return { ok: false, code: "ALLOWLIST", message: `REJECTED: Payee ${to} is not on the USDC pocket allowlist.` };
   }
   if (pocket.maxPerDay !== null && usage.spentToday + amount > pocket.maxPerDay) {
     return {
@@ -157,6 +161,34 @@ export function evaluateEvmSend(
     };
   }
   return { ok: true };
+}
+
+export function evaluateEvmSend(
+  pocket: EvmAssetPolicy | undefined,
+  killfileOn: boolean,
+  amount: number,
+  to: string,
+  usage: Usage = { spentToday: 0, spentLifetime: 0 },
+): Decision {
+  return evaluatePocket(pocket, killfileOn, amount, to, usage, {
+    name: "evm.usdc",
+    validPayee: isValidEvmAddress,
+    payeeHint: "0x EVM address",
+  });
+}
+
+export function evaluateSolanaSend(
+  pocket: EvmAssetPolicy | undefined,
+  killfileOn: boolean,
+  amount: number,
+  to: string,
+  usage: Usage = { spentToday: 0, spentLifetime: 0 },
+): Decision {
+  return evaluatePocket(pocket, killfileOn, amount, to, usage, {
+    name: "solana.usdc",
+    validPayee: isValidSolanaAddress,
+    payeeHint: "Solana base58 address",
+  });
 }
 
 export type Decision =
