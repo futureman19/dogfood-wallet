@@ -41,6 +41,8 @@ export type MerchantConfig = {
   solanaNetwork?: string;
   solanaFeePayerKey?: PrivateKey;
   solanaRpcUrl?: string;
+  solanaConfirmTries?: number;
+  solanaConfirmDelayMs?: number;
 };
 
 export type PaymentRequirement = {
@@ -173,6 +175,8 @@ export function createMerchantApp(cfg: MerchantConfig): (req: Request) => Promis
     fetchFn: cfg.fetchFn,
     replayStore: cfg.replayStore,
     priceBaseUnits: cfg.priceBaseUnits,
+    solanaConfirmTries: cfg.solanaConfirmTries,
+    solanaConfirmDelayMs: cfg.solanaConfirmDelayMs,
   });
   const facilitatorFetch = cfg.facilitatorFetch ?? fetch;
   const seenNonces = new Set<string>(); // fast-path replay guard; the USDC contract is the hard guard

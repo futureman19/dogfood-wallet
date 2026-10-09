@@ -151,7 +151,7 @@ describe("merchant Solana rail", () => {
 
   test("unconfirmed transaction surfaces as a 402 settlement error", async () => {
     const { fetchFn } = world({ confirmStatus: null });
-    const res = await pay(mkApp(fetchFn), await payHeader());
+    const res = await pay(mkApp(fetchFn, { solanaConfirmTries: 2, solanaConfirmDelayMs: 0 }), await payHeader());
     expect(res.status).toBe(402);
   });
 

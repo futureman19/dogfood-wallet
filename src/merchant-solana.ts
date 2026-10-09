@@ -29,6 +29,9 @@ export type SolanaMerchantConfig = {
   fetchFn?: typeof fetch;
   replayStore?: ReplayStore;
   priceBaseUnits: number;
+  /** Confirmation polling after submit (default 6 tries × 2s). Tests pass 0s. */
+  solanaConfirmTries?: number;
+  solanaConfirmDelayMs?: number;
 };
 
 function keypairFromKey(key: PrivateKey): Keypair {
@@ -129,21 +132,36 @@ export function createSolanaMerchant(cfg: SolanaMerchantConfig) {
     if (store.has(replayKey, [])) throw invalid("Solana payment replay: signature already used");
     store.reserve(replayKey, []);
 
-    // Co-sign as fee payer and submit.
+    // Co-sign as fee payer and submit, then poll for confirmation — a single
+    // immediate status check races Solana's confirmation ("pending" != failed).
     tx.sign([kp]);
     let signature: string;
-    let status: { value?: ({ confirmationStatus?: string; err?: unknown } | null)[] };
     try {
       signature = (await rpc("sendTransaction", [
         Buffer.from(tx.serialize()).toString("base64"),
         { encoding: "base64", preflightCommitment: "confirmed" },
       ])) as string;
-      status = (await rpc("getSignatureStatuses", [[signature]])) as typeof status;
     } catch (err) {
       throw settleFail(err instanceof Error ? err.message : "submit failed");
     }
-    const st = status?.value?.[0];
-    if (!st || st.err) throw settleFail(`transaction not confirmed: ${JSON.stringify(st?.err ?? "pending")}`);
+    const tries = cfg.solanaConfirmTries ?? 6;
+    const delay = cfg.solanaConfirmDelayMs ?? 2000;
+    let st: { confirmationStatus?: string; err?: unknown } | null | undefined;
+    for (let i = 0; i < tries; i++) {
+      let status: { value?: ({ confirmationStatus?: string; err?: unknown } | null)[] };
+      try {
+        status = (await rpc("getSignatureStatuses", [[signature]])) as typeof status;
+      } catch (err) {
+        throw settleFail(err instanceof Error ? err.message : "status check failed");
+      }
+      st = status?.value?.[0];
+      if (st?.err) break;
+      if (st && (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) break;
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, delay));
+    }
+    if (!st || st.err || !(st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) {
+      throw settleFail(`transaction not confirmed: ${JSON.stringify(st?.err ?? st?.confirmationStatus ?? "pending")}`);
+    }
     return signature;
   }
 
