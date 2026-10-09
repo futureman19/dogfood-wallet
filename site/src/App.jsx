@@ -36,6 +36,14 @@ const RAILS = [
     receiptLabel: "Devnet receipt",
   },
   {
+    name: "BSV",
+    tag: "Mainnet",
+    body: "Direct satoshi transfers over HTTP 402 — the client builds the whole transaction, the merchant broadcasts it. A 500-sat call settles for a ~$0.00004 network fee. No facilitator at all.",
+    receipt:
+      "https://whatsonchain.com/tx/5e0dacad4106833a3e1cc78778dd77e1951b3c410d79080c438a031c5298119c",
+    receiptLabel: "Mainnet receipt",
+  },
+  {
     name: "Live register",
     tag: "Try it",
     body: "A real merchant endpoint is running right now. Call it with no credentials and watch it answer HTTP 402 with a price menu — then pay it with the wallet and watch it serve.",
