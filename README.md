@@ -1,16 +1,26 @@
 # Dogfood Wallet
 
-Local BSV agent vault. The LLM requests payment. A signer on your machine authorizes it. The model never sees the key.
+The zero-trust wallet for agentic commerce. The LLM requests payment; a signer on **your** machine authorizes it. The model never sees the key.
 
-Open source. Not a hosted wallet. Not a consumer portfolio app.
+One vault secret speaks three chains — BSV, USDC on Base, USDC on Solana — and pays HTTP 402 challenges in seconds for a fraction of a cent. A merchant server is included, so the same codebase that buys is the codebase that sells.
+
+Open source (MIT). Not a hosted wallet. Not a consumer portfolio app. No revenue machinery, ever — if you charge with it, that money is yours.
+
+**Live demo register:** [`dogfood-merchant.fly.dev/v1/fortune`](https://dogfood-merchant.fly.dev/v1/fortune) — call it with no credentials, get a 402 price menu.
+
+**Receipts (every claim is auditable):**
+
+- BSV mainnet — [500-sat 402 payment, ~$0.00004 fee](https://whatsonchain.com/tx/5e0dacad4106833a3e1cc78778dd77e1951b3c410d79080c438a031c5298119c)
+- USDC on Base mainnet — [$0.001 settled by the wallet's own facilitator](https://basescan.org/tx/0xb5f3cb4356f37474dd5e3e80585c39d23958e1c03e706732b4eee8d76e9c43de)
+- USDC on Solana devnet — [fee-payer co-signed, payer needs no SOL](https://solscan.io/tx/25Ung41rJSNDtNVFuLLrsmZDnd3Lqf53vmENniQ3Eavf4PSCkWnJSRovP1Twy6ZGDpn6tLbX4YPCxVp9v7wACQpd?cluster=devnet)
 
 ## Architecture
 
-1. **Brain (agent)** — knows what to buy. Tools: `address`, `balance`, `status`, `send`, `kill`, `x402_inspect`, `x402_proof`, `x402_delegate`.
-2. **Vault (this repo)** — keys, sat cap, killfile, structured rejects.
-3. **Settlement** — BSV mainnet. Tiny fees so per-call payments are real.
+1. **Brain (agent)** — knows what to buy. Talks to the vault over MCP or CLI.
+2. **Vault (this repo)** — keys, per-asset caps, allowlists, killfile, structured rejects. One 32-byte secret derives all three identities (BSV P2PKH, secp256k1 EVM, ed25519 Solana).
+3. **Settlement** — whatever rail the merchant offers: BSV direct, or USDC via x402 `exact` on Base / Solana. Tiny fees make per-call payments real.
 
-Caps are in **satoshis**, not USD. There is no `refund` tool. Sweep/recovery is the owner’s job, not the agent’s.
+There is no `refund` tool. Sweep/recovery is the owner's job, not the agent's.
 
 ## Install
 
@@ -23,22 +33,49 @@ bun install
 bun src/cli.ts init
 ```
 
-Fund the printed address. Default vault: `~/.dogfood-wallet` (override with `DOGFOOD_WALLET_DIR`). New vaults: **10,000 sats/tx**, **50,000 sats/day**, **empty allowlist** (a human must `allow` a destination before the agent can send).
+Fund the printed address. Default vault: `~/.dogfood-wallet` (override with `DOGFOOD_WALLET_DIR`). New vaults: **10,000 sats/tx**, **50,000 sats/day**, **empty allowlist** (a human must `allow` a destination before the agent can send). EVM and Solana addresses derive from the same secret — print them with `evm-address` / `sol-address`.
 
 ```bash
-bun src/cli.ts address
-bun src/cli.ts balance
+bun src/cli.ts address                 # BSV
+bun src/cli.ts evm-address             # Base/EVM
+bun src/cli.ts sol-address             # Solana
+bun src/cli.ts balance                 # plus evm-balance / sol-balance
 bun src/cli.ts status
-bun src/cli.ts allow <p2pkh-address>
+bun src/cli.ts allow <address>         # per-chain policy blocks
 bun src/cli.ts send <p2pkh-address> <sats> [note]
 bun src/cli.ts fund-request <sats>
 # or paste that address into the Yours button on https://dogfoodwallet.com
-bun src/cli.ts kill
+bun src/cli.ts kill                    # writes STOP_SPENDING
 bun src/cli.ts sweep <p2pkh-address>
 bun src/cli.ts split [piece-sats]
 ```
 
-`allow`, `sweep`, `split`, and `fund-request` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. Split turns one fat UTXO into up to 20 even self-outputs (default piece 10k sats, min 1k) so later agent sends are not serialized on a single coin. Split does **not** count against daily/lifetime caps. `kill` writes `STOP_SPENDING`. A **human** deletes that file to resume agent sends. Agents must not.
+`allow`, `sweep`, `split`, and `fund-request` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. Split turns one fat UTXO into up to 20 even self-outputs so later agent sends are not serialized on a single coin. Split does **not** count against daily/lifetime caps. A **human** deletes `STOP_SPENDING` to resume agent sends. Agents must not.
+
+## Paying HTTP 402
+
+```bash
+bun src/cli.ts x402-pay <url>
+```
+
+Tries rails in order — **BSV sats → Base USDC → Solana USDC** — switching only on `UNSUPPORTED`, never after a policy, funding, or settlement refusal. Every rail goes through policy first: per-asset caps, destination allowlist, killfile. Successful payments log spend rows and print the on-chain receipt.
+
+- **BSV** (`bsv-direct` scheme, BRC-0121-flavored): the client builds and signs the full transaction; the merchant validates and broadcasts. 0-conf accepted for sub-cent prices.
+- **Base USDC** (x402 `exact`, EIP-3009): signed `transferWithAuthorization` settled by a facilitator — ours can be self-hosted (below), so no Coinbase account or business entity is needed.
+- **Solana USDC** (x402 `exact`): partially-signed versioned transaction; the merchant co-signs as fee payer and submits, so the payer needs no SOL.
+
+## Running a merchant
+
+```sh
+DOGFOOD_MERCHANT_PAYTO=0x… \
+DOGFOOD_MERCHANT_BSV_PAYTO=1… \
+bun src/cli.ts merchant 8410
+curl -i http://127.0.0.1:8410/v1/fortune   # → 402 with a price menu
+```
+
+Env knobs: `DOGFOOD_MERCHANT_PRICE` (USDC base units), `DOGFOOD_MERCHANT_NETWORK` (`base` / `base-sepolia`), `DOGFOOD_MERCHANT_BSV_SATS` (default 500), `DOGFOOD_MERCHANT_SOL_NETWORK` (`solana` / `solana-devnet`), `X402_FACILITATOR_URL`, `DOGFOOD_SELF_FACILITATE=1` (settle Base yourself: gas from the vault's ETH, key never leaves the machine), `DOGFOOD_MERCHANT_STATE` (replay ledger path — file-backed, survives restarts, append-before-broadcast).
+
+The merchant validates before settling: amount, payee, mint, unspent inputs, nonce reuse, signature recovery, replay ledger reservation. A `Dockerfile.merchant` + `fly.toml` deploy the keyless public variant (BSV-direct + testnet USDC) in one `fly deploy`.
 
 ## MCP
 
@@ -82,16 +119,9 @@ Default `http://127.0.0.1:38402/mcp`. Override `DOGFOOD_MCP_HOST` / `DOGFOOD_MCP
 | Bad address | `REJECTED: Destination is not a mainnet P2PKH address` |
 | Empty vault | `REJECTED: Insufficient funds` |
 
-The signer fails closed. The agent should pivot (cheaper source, stop), not retry with a new wallet.
+USDC rails have their own blocks (`evm.usdc`, `solana.usdc`) with the same allowlist + killfile semantics. The signer fails closed. The agent should pivot (cheaper source, stop), not retry with a new wallet.
 
-## Not this
-
-- Not the shared Hermes QA treasury (`1Gjc…`). That key stays private.
-- Not Yours Wallet / BSV Association mobile (those are for humans).
-- Not Coinbase-style hosted custody.
-- Not an x402 **gateway**. Merkle Works [x402 v1](https://github.com/ruidasilva/merkleworks-x402-spec) is the BSV paywall we intend to *pay*. We do not vendor their Go gateway.
-
-## x402 (payer)
+## Merkle Works x402 (payer)
 
 ```bash
 bun src/cli.ts x402-inspect <X402-Challenge>
@@ -101,30 +131,7 @@ bun src/cli.ts x402-delegate <X402-Challenge>
 
 Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-256, base64url, header binding, body hash, Bitcoin txid).
 
-`x402-delegate` POSTs `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402` (Merkle Works wire format), then builds `X402-Proof`. Unset URL → `NEED_DELEGATOR` (no fetch, no demo host). Policy still gates the payee. Broadcast is **off** unless `--broadcast` or `DOGFOOD_X402_BROADCAST=1` (uses the same GorillaPool ARC path as `send`). The merchant nonce UTXO is theirs; Dogfood does not spend local vault coins on it.
-
-## Direct BSV payments over HTTP 402
-
-`bun src/cli.ts x402-pay <url>` tries **BSV sats → Base USDC → Solana USDC**. It switches rails only on `UNSUPPORTED`, never after a policy, funding, or settlement refusal. BSV uses the normal per-transaction/day/lifetime caps, killfile, destination allowlist, and optional BRC-181 envelope. Successful receipts produce `kind: "send", asset: "bsv"` spend-log rows.
-
-The merchant's `/v1/fortune` can offer BSV alongside its existing USDC requirement:
-
-- `DOGFOOD_MERCHANT_BSV_PAYTO`: public mainnet P2PKH address; unset omits the BSV option.
-- `DOGFOOD_MERCHANT_BSV_SATS`: positive integer price, default `500`.
-- `DOGFOOD_MERCHANT_PAYTO`: public EVM address; required by `merchant-main.ts`. The local CLI uses this when set, otherwise derives the existing EVM payee from the vault.
-
-```sh
-DOGFOOD_MERCHANT_PAYTO=0x4242424242424242424242424242424242424242 \
-DOGFOOD_MERCHANT_BSV_PAYTO=1M5aSsbBEXhPFSj4QUikCaZ2GQmf7TRwFN \
-bun src/cli.ts merchant 8410
-curl -i http://127.0.0.1:8410/v1/fortune
-```
-
-The 402 advertises `{ scheme: "bsv-direct", network: "bsv-main", satoshis: 500, payTo }` and `x-bsv-payment-satoshis-required` / `x-bsv-payment-address` headers. A paid retry sends the full signed transaction hex in `X-BSV-PAYMENT`. This is a simplified **BRC-0121-flavored dialect**, not full compliance: plain addresses, no BRC-42 key derivation.
-
-The keyless merchant checks payment outputs and every input against WoC source transactions and unspent outputs, guards txid replay in-process, then broadcasts through the existing ARC helper (WoC fallback only for fee-policy rejection). It deliberately accepts **0-conf** for this sub-cent endpoint; unspent checks do not eliminate double-spend risk. Replay memory is process-local, not a shared durable ledger. A successful `X-PAYMENT-RESPONSE` identifies the transaction and `bsv-main` network. The client requires a matching success receipt and never independently broadcasts or automatically retries on ambiguous settlement.
-
-For the self-payment loop, a human must first allow the vault's own BSV address in its BSV policy. No policy changes or live payment are performed by the tests. Tests inject all chain/broadcast fetchers and use synthetic funding transactions with real signatures.
+`x402-delegate` POSTs `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402` (Merkle Works wire format), then builds `X402-Proof`. Unset URL → `NEED_DELEGATOR` (no fetch, no demo host). Policy still gates the payee. Broadcast is **off** unless `--broadcast` or `DOGFOOD_X402_BROADCAST=1`. The merchant nonce UTXO is theirs; Dogfood does not spend local vault coins on it.
 
 ## BRC-0204 (script + descriptor, not a live allowance)
 
@@ -153,6 +160,14 @@ bun src/cli.ts policy-inspect <envelope-json-or-file>
 Verifies a signed `brc-181/agent-policy/1` envelope against frozen vectors (`testdata/brc-181-vectors.json`). Canonical dest is `p2pkh:<hash160>` or `script:<sha256>`; OP_RETURN is not a dest. Human-only inspect. Not MCP.
 
 If the vault contains `brc181.json`, **`send` and `x402-delegate` also verify the envelope and enforce it** (AND with local `policy.json`). Origin is `DOGFOOD_ORIGIN_TOKEN` or the record's `origin_token`. Sweep/split ignore the envelope. A Vector A `max_fee` of 100 sats will reject a typical P2PKH fee — issue a record with a real fee cap. x402-delegate treats merchant fee as 0 (Dogfood does not spend local coins on the nonce UTXO).
+
+## Not this
+
+- Not the shared Hermes QA treasury (`1Gjc…`). That key stays private.
+- Not Yours Wallet / BSV Association mobile (those are for humans).
+- Not Coinbase-style hosted custody.
+- Not an x402 **gateway**. Merkle Works [x402 v1](https://github.com/ruidasilva/merkleworks-x402-spec) is the BSV paywall we intend to *pay*. We do not vendor their Go gateway.
+- Not a business. MIT, free forever, no revenue cut built in.
 
 ## Later
 
