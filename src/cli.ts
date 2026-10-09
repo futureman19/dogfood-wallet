@@ -490,6 +490,17 @@ async function main() {
                 selfSettle({ chain, account, payment: payment as never, requirement, ownPayTo: payTo });
             })()
           : undefined,
+        ...(selfFacilitate
+          ? await (async () => {
+              const vault = loadVault(root);
+              const { deriveSolanaAddress } = await import("./solana");
+              return {
+                solanaPayTo: deriveSolanaAddress(vault.key),
+                solanaFeePayerKey: vault.key,
+                solanaNetwork: process.env.DOGFOOD_MERCHANT_SOL_NETWORK ?? "solana-devnet",
+              };
+            })()
+          : {}),
         priceBaseUnits,
         resourcePath: "/v1/fortune",
         facilitatorUrl,

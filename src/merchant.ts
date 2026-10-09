@@ -1,7 +1,9 @@
 import { getAddress, recoverTypedDataAddress } from "viem";
 import { createBsvMerchant } from "./merchant-bsv";
+import { createSolanaMerchant, SolanaMerchantError } from "./merchant-solana";
 import { evmTransferAuthorizationTypes, USDC_BASE, USDC_BASE_SEPOLIA } from "./evm";
 import type { ReplayStore } from "./replay-store";
+import type { PrivateKey } from "@bsv/sdk";
 
 // The cash register: a Coinbase-x402 (`exact`) merchant endpoint that
 // accepts USDC straight into the vault's EVM pocket. "Any coin in" starts
@@ -34,6 +36,11 @@ export type MerchantConfig = {
   /** Local self-facilitation: settle mainnet USDC ourselves instead of calling
    *  a hosted facilitator. Local runs only — keys never leave this machine. */
   settleFn?: (payment: unknown, requirement: PaymentRequirement) => Promise<{ success: boolean; txHash?: string | null; errorReason?: string }>;
+  /** Local Solana self-facilitation (fee payer = vault-derived key). Omit on fly. */
+  solanaPayTo?: string;
+  solanaNetwork?: string;
+  solanaFeePayerKey?: PrivateKey;
+  solanaRpcUrl?: string;
 };
 
 export type PaymentRequirement = {
@@ -158,12 +165,21 @@ const FORTUNES = [
 
 export function createMerchantApp(cfg: MerchantConfig): (req: Request) => Promise<Response> {
   const bsv = createBsvMerchant(cfg);
+  const sol = createSolanaMerchant({
+    solanaPayTo: cfg.solanaPayTo,
+    solanaNetwork: cfg.solanaNetwork,
+    solanaFeePayerKey: cfg.solanaFeePayerKey,
+    solanaRpcUrl: cfg.solanaRpcUrl,
+    fetchFn: cfg.fetchFn,
+    replayStore: cfg.replayStore,
+    priceBaseUnits: cfg.priceBaseUnits,
+  });
   const facilitatorFetch = cfg.facilitatorFetch ?? fetch;
   const seenNonces = new Set<string>(); // fast-path replay guard; the USDC contract is the hard guard
 
   function paymentRequired(baseUrl: string, error?: string): Response {
     return Response.json(
-      { x402Version: 1, error: error ?? "Payment required", accepts: [buildUsdcRequirement(cfg, baseUrl), ...(bsv ? [bsv.requirement] : [])] },
+      { x402Version: 1, error: error ?? "Payment required", accepts: [buildUsdcRequirement(cfg, baseUrl), ...(bsv ? [bsv.requirement] : []), ...(sol ? [sol.requirement] : [])] },
       { status: 402, headers: bsv ? {
         "x-bsv-payment-satoshis-required": String(bsv.requirement.satoshis),
         "x-bsv-payment-address": bsv.requirement.payTo,
@@ -198,6 +214,31 @@ export function createMerchantApp(cfg: MerchantConfig): (req: Request) => Promis
 
     const header = req.headers.get("X-PAYMENT");
     if (!header) return paymentRequired(baseUrl);
+
+    // Solana payments carry a partially-signed transaction, not an EIP-712 sig.
+    // (The header is base64 — decode before sniffing the shape.)
+    let isSolanaPayment = false;
+    try {
+      const peek = JSON.parse(Buffer.from(header, "base64").toString("utf8")) as { payload?: { transaction?: unknown } };
+      isSolanaPayment = typeof peek?.payload?.transaction === "string";
+    } catch { /* not JSON — fall through to the EVM parser, which will reject it */ }
+    if (isSolanaPayment) {
+      if (!sol) return paymentRequired(baseUrl, "Solana payments are not enabled");
+      try {
+        const signature = await sol.settle(header);
+        const receipt = Buffer.from(
+          JSON.stringify({ success: true, transaction: signature, network: sol.requirement.network }),
+        ).toString("base64");
+        return Response.json(
+          { fortune: FORTUNES[Math.floor(Math.random() * FORTUNES.length)], price: cfg.priceBaseUnits, asset: "USDC" },
+          { status: 200, headers: { "X-PAYMENT-RESPONSE": receipt } },
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "settlement failed";
+        const prefix = err instanceof SolanaMerchantError && err.kind === "SETTLE" ? "Settlement failed" : "Solana payment invalid";
+        return paymentRequired(baseUrl, `${prefix}: ${msg}`);
+      }
+    }
 
     let payment: PaymentPayload;
     try {
