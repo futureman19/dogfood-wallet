@@ -15,7 +15,7 @@ const steps = [
     sub: "Funding",
     Icon: Wallet,
     summary:
-      "You send a small amount of BSV from your own wallet to your local vault address. Keep the rest of your funds separate—your agent only gets pocket change.",
+      "You send a small amount from your own wallet to your local vault address. Keep the rest of your funds separate—your agent only gets pocket change.",
   },
   {
     title: "Local Vault",
