@@ -31,6 +31,9 @@ export type MerchantConfig = {
   bsvSatoshis?: number;
   fetchFn?: typeof fetch;
   replayStore?: ReplayStore;
+  /** Local self-facilitation: settle mainnet USDC ourselves instead of calling
+   *  a hosted facilitator. Local runs only — keys never leave this machine. */
+  settleFn?: (payment: unknown, requirement: PaymentRequirement) => Promise<{ success: boolean; txHash?: string | null; errorReason?: string }>;
 };
 
 export type PaymentRequirement = {
@@ -209,21 +212,34 @@ export function createMerchantApp(cfg: MerchantConfig): (req: Request) => Promis
     const nonceKey = `${verdict.payer.toLowerCase()}:${payment.payload.authorization.nonce.toLowerCase()}`;
     if (seenNonces.has(nonceKey)) return paymentRequired(baseUrl, "Payment invalid: nonce already used");
 
-    const settleRes = await facilitatorFetch(`${cfg.facilitatorUrl.replace(/\/$/, "")}/settle`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ x402Version: 1, paymentPayload: payment, paymentRequirements: requirement }),
-    });
-    const settleBody = (await settleRes.json().catch(() => ({}))) as {
-      success?: boolean;
-      transaction?: string;
-      txHash?: string;
-      error?: string;
-      errorReason?: string;
-    };
-    if (!settleRes.ok || settleBody.success !== true) {
-      const why = settleBody.errorReason ?? settleBody.error ?? `HTTP ${settleRes.status}`;
-      return paymentRequired(baseUrl, `Settlement failed: ${why}`);
+    let settled: { success: boolean; txHash?: string | null; errorReason?: string };
+    if (cfg.settleFn) {
+      try {
+        settled = await cfg.settleFn(payment, requirement);
+      } catch (err) {
+        settled = { success: false, errorReason: err instanceof Error ? err.message : "settle failed" };
+      }
+    } else {
+      const settleRes = await facilitatorFetch(`${cfg.facilitatorUrl.replace(/\/$/, "")}/settle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ x402Version: 1, paymentPayload: payment, paymentRequirements: requirement }),
+      });
+      const settleBody = (await settleRes.json().catch(() => ({}))) as {
+        success?: boolean;
+        transaction?: string;
+        txHash?: string;
+        error?: string;
+        errorReason?: string;
+      };
+      settled = {
+        success: settleRes.ok && settleBody.success === true,
+        txHash: settleBody.transaction ?? settleBody.txHash ?? null,
+        errorReason: settleBody.errorReason ?? settleBody.error ?? `HTTP ${settleRes.status}`,
+      };
+    }
+    if (!settled.success) {
+      return paymentRequired(baseUrl, `Settlement failed: ${settled.errorReason ?? "unknown"}`);
     }
     seenNonces.add(nonceKey);
 
@@ -231,7 +247,7 @@ export function createMerchantApp(cfg: MerchantConfig): (req: Request) => Promis
     const receipt = Buffer.from(
       JSON.stringify({
         success: true,
-        transaction: settleBody.transaction ?? settleBody.txHash ?? null,
+        transaction: settled.txHash ?? null,
         network: cfg.network,
         payer: verdict.payer,
       }),

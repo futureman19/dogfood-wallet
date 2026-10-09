@@ -474,11 +474,22 @@ async function main() {
       const priceBaseUnits = Number(process.env.DOGFOOD_MERCHANT_PRICE ?? 1_000);
       const statePath = process.env.DOGFOOD_MERCHANT_STATE;
       const { createFileReplayStore } = await import("./replay-store");
+      // DOGFOOD_SELF_FACILITATE=1: settle mainnet USDC ourselves (local only —
+      // loads the vault key, pays gas from the pocket's ETH).
+      const selfFacilitate = process.env.DOGFOOD_SELF_FACILITATE === "1";
       const app = createMerchantApp({
         payTo,
         bsvPayTo: process.env.DOGFOOD_MERCHANT_BSV_PAYTO,
         bsvSatoshis: Number(process.env.DOGFOOD_MERCHANT_BSV_SATS ?? 500),
         replayStore: statePath ? createFileReplayStore(statePath) : undefined,
+        settleFn: selfFacilitate
+          ? await (async () => {
+              const { makeBaseFacilitatorChain, selfSettle } = await import("./facilitator");
+              const { chain, account } = makeBaseFacilitatorChain(loadVault(root).key);
+              return async (payment: unknown, requirement: never) =>
+                selfSettle({ chain, account, payment: payment as never, requirement, ownPayTo: payTo });
+            })()
+          : undefined,
         priceBaseUnits,
         resourcePath: "/v1/fortune",
         facilitatorUrl,
