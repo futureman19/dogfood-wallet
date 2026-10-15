@@ -80,16 +80,29 @@ try {
 } finally { await client.close(); }
 `);
   const smokeResult = run([process.execPath, ...args, smoke]);
-  // Bun's generated bin launcher is platform-specific (.bunx on Windows).
+  // Linux must execute the installed launcher itself (permissions + shebang + PATH),
+  // not have Bun read its target. Windows retains the explicit-Bun compatibility check.
+  // A cwd-local config preserves no-auto-install/preload isolation through the shebang.
   const bin = join(consumer, "node_modules", ".bin", "dogfood-wallet");
-  const binHelp = run([process.execPath, ...args, bin, "--help"]);
-  assert(binHelp.includes("Dogfood Wallet"));
-  assert.equal(JSON.parse(run([process.execPath, ...args, bin, "doctor"])).policy.destinations, 0);
+  const launcherMarker = join(scratch, "launcher-preload-ran");
+  const launcherPreload = join(scratch, "launcher-preload.ts");
+  writeFileSync(launcherPreload, `import ${JSON.stringify(deny)};\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(launcherMarker)}, 'fetch-denied');\n`);
+  writeFileSync(join(unrelated, "bunfig.toml"), `preload = [${JSON.stringify(launcherPreload.replaceAll("\\", "/"))}]\n[install]\nauto = "disable"\n`);
+  const nativeLauncher = process.platform === "linux";
+  const launcherRun = (...commands: string[]) => {
+    rmSync(launcherMarker, { force: true });
+    const output = run(nativeLauncher ? [bin, ...commands] : [process.execPath, bin, ...commands]);
+    assert.equal(readFileSync(launcherMarker, "utf8"), "fetch-denied", "Launcher skipped network-denying preload");
+    return output;
+  };
+  assert(launcherRun("--help").includes("Dogfood Wallet"));
+  assert.equal(JSON.parse(launcherRun("doctor")).policy.destinations, 0);
+  const launcher = nativeLauncher ? "Linux native installed executable: help/doctor (shebang + PATH; fetch denied; auto-install disabled)" : "Explicit Bun installed-bin help/doctor only; native launcher NOT verified on this platform";
   // Deployment entrypoint fails safely without an explicit public payee.
   const merchant = Bun.spawnSync([process.execPath, ...args, join(installed, "src/merchant-main.ts")], { cwd: unrelated, env, timeout: 10000 });
   assert.equal(merchant.exitCode, 1);
   assert(merchant.stderr.toString().includes("DOGFOOD_MERCHANT_PAYTO is required"));
-  console.log(JSON.stringify({ package: pack.id, entryCount: pack.entryCount, size: pack.size, unpackedSize: pack.unpackedSize, files: paths, cli: "installed bin help/doctor; absolute installed entrypoint init/address/status/evm-address/sol-address; merchant missing-payee rejection", smoke: smokeResult }, null, 2));
+  console.log(JSON.stringify({ package: pack.id, entryCount: pack.entryCount, size: pack.size, unpackedSize: pack.unpackedSize, files: paths, launcher, cli: "absolute installed entrypoint init/address/status/evm-address/sol-address; merchant missing-payee rejection", smoke: smokeResult }, null, 2));
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

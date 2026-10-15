@@ -38,7 +38,9 @@ The package manager also creates a `node_modules/.bin/dogfood-wallet` launcher;
 its platform-specific shim needs Bun on PATH. For MCP use the absolute Bun
 executable, args `--no-install`, the absolute installed `src/cli.ts`, and `mcp`,
 plus explicit `DOGFOOD_WALLET_DIR`. No client cwd support is assumed. Global
-installation and cross-platform launcher behavior remain separate release gates.
+installation and native launchers outside Linux remain separate release gates.
+The existing Ubuntu CI package check directly executes the local installed launcher
+for help/doctor; it does not replace the launcher with `bun <bin-path>` on Linux.
 
 ## Reproducible acceptance
 
@@ -52,7 +54,11 @@ The last command needs npm and registry access for a fresh local Bun consumer
 install. It creates a real tarball and checks npm's JSON inventory against an
 exact public allowlist, then installs into scratch with lifecycle scripts disabled.
 Runtime processes use `--no-install`, scrubbed environment and an explicitly
-selected unfunded vault, from unrelated cwd. It checks installed help/doctor,
+selected unfunded vault, from unrelated cwd. For the native Linux launcher check,
+a scratch-only `bunfig.toml` sets `install.auto = "disable"` and loads the fetch-denying
+preload; a fresh marker verifies that preload ran for each help/doctor invocation.
+Other platforms report explicit-Bun bin checks, not native-launcher acceptance.
+It checks installed help/doctor,
 local addresses, MCP discovery/address/status and deny-by-default; imports optional
 runtime modules with fetch forbidden. It never calls balance, providers or chain
 endpoints, funds anything, publishes, or uses global installs. All generated
