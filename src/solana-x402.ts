@@ -1,3 +1,4 @@
+import type { PaymentIntent } from "./payment-guard";
 import type { PrivateKey } from "@bsv/sdk";
 import {
   buildSolanaX402PaymentHeader,
@@ -64,6 +65,8 @@ export async function settleSolanaX402(opts: {
   killfileOn: boolean;
   usage: Usage;
   fetchFn?: typeof fetch;
+  requireReceipt?: boolean;
+  beforeSign?: (intent: PaymentIntent) => void;
   onSpend?: (row: Record<string, unknown>) => void;
 }): Promise<SolanaSettleResult> {
   const fetchFn = opts.fetchFn ?? fetch;
@@ -85,6 +88,7 @@ export async function settleSolanaX402(opts: {
   const decision = evaluateSolanaSend(opts.pocket, opts.killfileOn, amount, req.payTo, opts.usage);
   if (!decision.ok) throw new SolanaX402Error(decision.code, decision.message);
 
+  opts.beforeSign?.({ asset: "usdc-solana", amount, to: req.payTo });
   const header = await buildSolanaX402PaymentHeader({ key: opts.key, requirement: req, fetchFn });
   const paid = await fetchFn(opts.url, { headers: { "X-PAYMENT": header } });
 
@@ -98,6 +102,10 @@ export async function settleSolanaX402(opts: {
       settle = null;
     }
   }
+  const txHash = settle?.transaction ?? settle?.txHash ?? null;
+  if (opts.requireReceipt && (settle?.success !== true || typeof txHash !== "string" || !txHash)) {
+    throw new SolanaX402Error("SETTLE_FAILED", "REJECTED: missing or invalid settlement receipt; hold retained.");
+  }
   if (settle && settle.success === false) {
     throw new SolanaX402Error(
       "SETTLE_FAILED",
@@ -108,7 +116,6 @@ export async function settleSolanaX402(opts: {
     throw new SolanaX402Error("SETTLE_FAILED", `REJECTED: merchant returned HTTP ${paid.status} after payment.`);
   }
 
-  const txHash = settle?.transaction ?? settle?.txHash ?? null;
   const text = await paid.text();
   opts.onSpend?.({
     t: new Date().toISOString(),

@@ -1,3 +1,4 @@
+import type { PaymentIntent } from "./payment-guard";
 import { P2PKH, Transaction, type PrivateKey } from "@bsv/sdk";
 import { evaluateSend, type Policy, type Usage } from "./policy";
 import { defaultFetchTxHex, defaultFetchUtxos, selectUtxos } from "./send";
@@ -53,6 +54,7 @@ export async function settleBsvX402(opts: {
   policy: Policy;
   usage: Usage;
   fetchFn?: typeof fetch;
+  beforeSign?: (intent: PaymentIntent) => void;
   onSpend?: (row: Record<string, unknown>) => void;
   policyEnvelope?: PolicyEnvelope | null;
   origin?: string;
@@ -114,6 +116,7 @@ export async function settleBsvX402(opts: {
   }
   tx.addOutput({ satoshis: req.satoshis, lockingScript: new P2PKH().lock(req.payTo) });
   if (change > 1) tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(opts.from) });
+  opts.beforeSign?.({ asset: "bsv", amount: req.satoshis, to: req.payTo, fee: actualFee });
   await tx.sign();
   const txid = tx.id("hex");
   // Merchant owns broadcast. Never independently broadcast or try another rail after signing.

@@ -1,3 +1,4 @@
+import type { PaymentIntent } from "./payment-guard";
 import type { PrivateKey } from "@bsv/sdk";
 import { buildX402PaymentHeader, USDC_BASE, USDC_BASE_SEPOLIA, type X402ExactRequirement } from "./evm";
 import { evaluateEvmSend, type EvmAssetPolicy, type Usage } from "./policy";
@@ -60,6 +61,8 @@ export async function settleUsdcX402(opts: {
   killfileOn: boolean;
   usage: Usage;
   fetchFn?: typeof fetch;
+  requireReceipt?: boolean;
+  beforeSign?: (intent: PaymentIntent) => void;
   onSpend?: (row: Record<string, unknown>) => void;
   now?: number;
 }): Promise<UsdcSettleResult> {
@@ -82,6 +85,7 @@ export async function settleUsdcX402(opts: {
   const decision = evaluateEvmSend(opts.pocket, opts.killfileOn, amount, req.payTo, opts.usage);
   if (!decision.ok) throw new UsdcX402Error(decision.code, decision.message);
 
+  opts.beforeSign?.({ asset: "usdc-base", amount, to: req.payTo });
   const header = await buildX402PaymentHeader({ key: opts.key, requirement: req, from: opts.from, now: opts.now });
   const paid = await fetchFn(opts.url, { headers: { "X-PAYMENT": header } });
 
@@ -93,6 +97,9 @@ export async function settleUsdcX402(opts: {
     } catch {
       settle = null;
     }
+  }
+  if (opts.requireReceipt && (settle?.success !== true || typeof settle.transaction !== "string" || !settle.transaction)) {
+    throw new UsdcX402Error("SETTLE_FAILED", "REJECTED: missing or invalid settlement receipt; hold retained.");
   }
   if (settle && settle.success === false) {
     throw new UsdcX402Error(

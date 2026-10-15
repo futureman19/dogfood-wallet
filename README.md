@@ -123,6 +123,12 @@ Default `http://127.0.0.1:38402/mcp`. Override `DOGFOOD_MCP_HOST` / `DOGFOOD_MCP
 
 USDC rails have their own blocks (`evm.usdc`, `solana.usdc`) with the same allowlist + killfile semantics. The signer fails closed. The agent should pivot (cheaper source, stop), not retry with a new wallet.
 
+## Payment concurrency and recovery
+
+CLI/MCP `send` and `x402-pay` share a per-vault cross-process lock. A durable pending intent is recorded before signing; uncertain outcomes retain a hold instead of permitting another payment. Successful payments release it only after durable spend accounting. Inspect without unlocking with `bun src/cli.ts payment-inspect`.
+
+This does **not** yet cover legacy `x402-delegate`, bridge/raw sends, allowance funding or split. Do not run those concurrently with guarded payments or use them to bypass a hold. Owner sweep and kill remain available. There is no automatic hold expiry or clear command. See [payment recovery and scope limitations](docs/payment-recovery.md) before operating unattended.
+
 ## Merkle Works x402 (payer)
 
 ```bash

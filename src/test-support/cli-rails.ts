@@ -1,5 +1,12 @@
-// Subprocess-only fixtures: no vault IO, chain RPC, or signed payment leaves this process.
+// Routing-only subprocess fixtures: mocked keys/rails, real disposable lock files.
+// Full payment/hold integration is covered by mcp-x402 and payment-safety tests.
 import { mock } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+const root = mkdtempSync(join(tmpdir(), "cli-rails-"));
+process.env.DOGFOOD_WALLET_DIR = root;
+process.on("exit", () => rmSync(root, { recursive: true, force: true }));
 import { PrivateKey } from "@bsv/sdk";
 import * as vault from "../vault";
 import { BsvX402Error } from "../bsv-x402";

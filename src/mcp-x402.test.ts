@@ -19,6 +19,8 @@ for (const [rail, challenges, asset] of [["bsv", 1, "bsv"], ["base", 2, "usdc-ba
     expect(r.isError).toBe(false);
     expect(r.body).toMatchObject({ ok: true, body: "fixture paid" });
     expect(r.payments).toEqual([rail]);
+    expect(r.events).toContain("held-before-payment");
+    expect(r.held).toBe(false);
     expect(r.events.filter((e: string) => e === "challenge")).toHaveLength(challenges);
     expect(r.rows).toHaveLength(1);
     expect(r.rows[0]).toMatchObject({ kind: "send", asset, amount: 500, to: r.body.payTo, resource: "https://fixture.invalid/fortune", txid: rail === "bsv" ? r.body.txid : r.body.txHash });
@@ -33,9 +35,33 @@ for (const [rail, challenges, asset] of [["bsv", 1, "bsv"], ["base", 2, "usdc-ba
       expect(r.payments).toEqual(failure === "settle" ? [rail] : []);
       if (failure !== "settle") expect(r.events).toEqual(Array(challenges).fill("challenge"));
       expect(r.rows).toEqual([]);
+      if (failure === "settle") {
+        expect(r.held).toBe(true);
+        expect(r.retryBody).toMatchObject({ code: "PAYMENT_HELD" });
+      }
     });
   }
 }
+
+for (const rail of ["bsv", "base", "solana"]) {
+  for (const failure of ["timeout", "missing-receipt", "body-timeout"]) {
+    test(`MCP ${rail} ${failure} retains durable hold and blocks subsequent calls`, async () => {
+      const r = await call(rail, failure);
+      expect(r.isError).toBe(true);
+      expect(r.held).toBe(true);
+      expect(r.retryBody).toMatchObject({ code: "PAYMENT_HELD" });
+      expect(r.payments).toEqual([rail]);
+      expect(r.rows).toHaveLength(failure === "body-timeout" && rail === "bsv" ? 1 : 0);
+    });
+  }
+}
+
+test("MCP Solana preserves txHash receipt alias", async () => {
+  const r = await call("solana", "txhash-alias");
+  expect(r.isError).toBe(false);
+  expect(r.held).toBe(false);
+  expect(r.rows).toHaveLength(1);
+});
 
 test("MCP BSV funding refusal does not fall through to offered Base/Solana", async () => {
   const r = await call("bsv", "funding");

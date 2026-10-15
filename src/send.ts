@@ -1,3 +1,4 @@
+import { PaymentHeldError, withPaymentGuard } from "./payment-guard";
 import { appendFileSync } from "node:fs";
 import { P2PKH, Transaction } from "@bsv/sdk";
 import { evaluateSend, evaluateSweep, evaluateSplit, planSplit, DEFAULT_SPLIT_PIECE, isValidAddress } from "./policy";
@@ -105,75 +106,73 @@ export async function sendPayment(opts: {
   fetchTxHex?: (txid: string) => Promise<string>;
   broadcast?: (raw: string) => Promise<{ txid: string }>;
 }): Promise<SendResult> {
-  const vault = loadVault(opts.root);
-  const usage = loadUsage(opts.root);
-  const decision = evaluateSend(vault.policy, opts.amount, opts.to, usage);
-  if (!decision.ok) return decision;
+  try {
+    return await withPaymentGuard(opts.root, "send", async (guard) => {
+      const vault = loadVault(opts.root);
+      const usage = loadUsage(opts.root);
+      const decision = evaluateSend(vault.policy, opts.amount, opts.to, usage);
+      if (!decision.ok) return decision;
 
-  const loaded = loadPolicyEnvelope(vaultPaths(opts.root).brc181);
-  if (!loaded.ok) return loaded;
-  const pre = gateAgentSend({
-    envelope: loaded.envelope,
-    to: opts.to,
-    amount: opts.amount,
-    fee: 0,
-    spentTotal: usage.spentLifetime,
-    origin: opts.origin,
-  });
-  if (!pre.ok) return pre;
+      const loaded = loadPolicyEnvelope(vaultPaths(opts.root).brc181);
+      if (!loaded.ok) return loaded;
+      const pre = gateAgentSend({
+        envelope: loaded.envelope,
+        to: opts.to,
+        amount: opts.amount,
+        fee: 0,
+        spentTotal: usage.spentLifetime,
+        origin: opts.origin,
+      });
+      if (!pre.ok) return pre;
 
-  const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
-  const { chosen, fee, total } = selectUtxos(utxos, opts.amount);
-  if (chosen.length === 0 || total < opts.amount + fee) {
-    return {
-      ok: false,
-      code: "INSUFFICIENT",
-      message: `REJECTED: Insufficient funds (${total} sats available, need ${opts.amount + fee}).`,
-    };
-  }
-  const post = gateAgentSend({
-    envelope: loaded.envelope,
-    to: opts.to,
-    amount: opts.amount,
-    fee,
-    spentTotal: usage.spentLifetime,
-    origin: opts.origin,
-  });
-  if (!post.ok) return post;
+      const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
+      const { chosen, fee, total } = selectUtxos(utxos, opts.amount);
+      if (chosen.length === 0 || total < opts.amount + fee) {
+        return {
+          ok: false,
+          code: "INSUFFICIENT",
+          message: `REJECTED: Insufficient funds (${total} sats available, need ${opts.amount + fee}).`,
+        };
+      }
+      const post = gateAgentSend({
+        envelope: loaded.envelope,
+        to: opts.to,
+        amount: opts.amount,
+        fee,
+        spentTotal: usage.spentLifetime,
+        origin: opts.origin,
+      });
+      if (!post.ok) return post;
 
-  const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
-  const tx = new Transaction();
-  for (const u of chosen) {
-    const hex = await fetchTxHex(u.tx_hash);
-    const source = Transaction.fromHex(hex);
-    tx.addInput({
-      sourceTransaction: source,
-      sourceTXID: u.tx_hash,
-      sourceOutputIndex: u.tx_pos,
-      unlockingScriptTemplate: new P2PKH().unlock(vault.key),
+      const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
+      const tx = new Transaction();
+      for (const u of chosen) {
+        const hex = await fetchTxHex(u.tx_hash);
+        const source = Transaction.fromHex(hex);
+        tx.addInput({
+          sourceTransaction: source,
+          sourceTXID: u.tx_hash,
+          sourceOutputIndex: u.tx_pos,
+          unlockingScriptTemplate: new P2PKH().unlock(vault.key),
+        });
+      }
+      tx.addOutput({ satoshis: opts.amount, lockingScript: new P2PKH().lock(opts.to) });
+      const change = total - opts.amount - fee;
+      if (change > 1) {
+        tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(vault.address) });
+      }
+      guard.reserve({ asset: "bsv", amount: opts.amount, to: opts.to, fee });
+      await tx.sign();
+      const raw = tx.toHex();
+      const { txid } = await (opts.broadcast ?? defaultBroadcast)(raw);
+      if (txid !== tx.id("hex")) throw new Error("Ambiguous broadcast acknowledgement; payment hold retained.");
+      guard.log({ t: new Date().toISOString(), txid, to: opts.to, amount: opts.amount, fee, note: opts.note ?? "" });
+      return { ok: true, txid, amount: opts.amount, to: opts.to, fee };
     });
+  } catch (e) {
+    if (e instanceof PaymentHeldError) return { ok: false, code: e.code, message: e.message };
+    throw e;
   }
-  tx.addOutput({ satoshis: opts.amount, lockingScript: new P2PKH().lock(opts.to) });
-  const change = total - opts.amount - fee;
-  if (change > 1) {
-    tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(vault.address) });
-  }
-  await tx.sign();
-  const raw = tx.toHex();
-  const { txid } = await (opts.broadcast ?? defaultBroadcast)(raw);
-  const paths = vaultPaths(opts.root);
-  appendFileSync(
-    paths.log,
-    `${JSON.stringify({
-      t: new Date().toISOString(),
-      txid,
-      to: opts.to,
-      amount: opts.amount,
-      fee,
-      note: opts.note ?? "",
-    })}\n`,
-  );
-  return { ok: true, txid, amount: opts.amount, to: opts.to, fee };
 }
 
 // Raw transport: builds, signs and broadcasts a simple P2PKH payment with

@@ -2,7 +2,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { PrivateKey, P2PKH, Transaction } from "@bsv/sdk";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../mcp";
@@ -51,10 +51,14 @@ try {
       const usdc = headers.get("X-PAYMENT");
       if (!bsv && !usdc) { events.push("challenge"); return Response.json({ x402Version: 1, accepts: requirements }, { status: 402 }); }
       const selected = bsv ? "bsv" : JSON.parse(Buffer.from(usdc!, "base64").toString()).network;
+      events.push(existsSync(join(root, "payment.pending.json")) ? "held-before-payment" : "unheld-payment");
       payments.push(selected);
       events.push("payment");
+      if (failure === "timeout") throw new Error("fixture timeout after payment");
       const receipt = { success: failure !== "settle", network: bsv ? "bsv-main" : selected, transaction: bsv ? Transaction.fromHex(bsv).id("hex") : "fixture-settlement", error: "fixture refusal" };
-      return new Response("fixture paid", { status: failure === "settle" ? 402 : 200, headers: { "X-PAYMENT-RESPONSE": Buffer.from(JSON.stringify(receipt)).toString("base64") } });
+      if (failure === "txhash-alias" && rail === "solana") { (receipt as any).txHash = receipt.transaction; delete (receipt as any).transaction; }
+      if (failure === "body-timeout") return new Response(new ReadableStream({ start(controller) { controller.error(new Error("fixture body timeout")); } }), { headers: { "X-PAYMENT-RESPONSE": Buffer.from(JSON.stringify(receipt)).toString("base64") } });
+      return new Response("fixture paid", { status: failure === "settle" ? 402 : 200, headers: failure === "missing-receipt" ? {} : { "X-PAYMENT-RESPONSE": Buffer.from(JSON.stringify(receipt)).toString("base64") } });
     }
     if (target === `https://api.whatsonchain.com/v1/bsv/main/address/${vault.address}/unspent`) {
       events.push("utxos");
@@ -73,7 +77,10 @@ try {
   const result = await client.callTool({ name: "x402_pay", arguments: { url } });
   const body = JSON.parse((result.content as { text: string }[])[0].text);
   const rows = readFileSync(paths.log, "utf8").trim().split("\n").map(l => JSON.parse(l));
-  console.log(JSON.stringify({ isError: result.isError, body, events, payments, rows: rows.slice(seed.length) }));
+  const held = existsSync(join(root, "payment.pending.json"));
+  const retry = held ? await client.callTool({ name: "x402_pay", arguments: { url } }) : null;
+  const retryBody = retry ? JSON.parse((retry.content as { text: string }[])[0].text) : null;
+  console.log(JSON.stringify({ held, retryBody, isError: result.isError, body, events, payments, rows: rows.slice(seed.length) }));
 } finally {
   await client.close();
   await server.close();
