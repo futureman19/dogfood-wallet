@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { PaymentHeldError, withPaymentGuard, type PaymentGuard } from "./payment-guard";
 import { join } from "node:path";
 import { Certificate, KeyDeriver, LockingScript, MasterCertificate, P2PKH, PrivateKey, ProtoWallet, Transaction, UnlockingScript } from "@bsv/sdk";
 import { evaluateAllowanceFund, evaluateSweep, estimateFee, MAX_SPLIT_OUTPUTS } from "./policy";
@@ -293,7 +294,112 @@ export type FundResult =
     }
   | { ok: false; code: string; message: string };
 
-export async function fundAllowance(opts: {
+// Append-only private recovery evidence. Never infer settlement from these bytes.
+function allowancePresent(path: string): boolean {
+  try { lstatSync(path); return true; }
+  catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return false; throw e; }
+}
+function syncAllowanceDirectory(path: string) {
+  if (process.platform === "win32") return;
+  const fd = openSync(path, "r");
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+function writeAllowanceFile(path: string, value: unknown) {
+  const fd = openSync(path, "wx", 0o600);
+  try { writeFileSync(fd, JSON.stringify(value) + "\n"); fsyncSync(fd); }
+  finally { closeSync(fd); }
+  syncAllowanceDirectory(join(path, ".."));
+}
+function invalidAllowance(): never { throw new Error("Invalid allowance state; stop spenders and inspect private recovery evidence."); }
+
+type StoredAllowance = {
+  recordId: string;
+  status: "legacy" | "accounted" | "unresolved";
+  fee?: number;
+  descriptor: Record<string, any>;
+  txid: string;
+};
+async function validateStoredDescriptor(raw: unknown) {
+  const inspected = inspectDescriptor(raw);
+  if (!inspected.ok) invalidAllowance();
+  const d = raw as Record<string, any>;
+  const seen = new Set<string>();
+  for (const point of [...d.outputs.map((o: any) => o.outpoint), d.revocationOutpoint]) {
+    const { txid, vout } = parseOutpoint(point);
+    if (!/^[0-9a-f]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || vout > 0xffffffff || seen.has(point)) invalidAllowance();
+    seen.add(point);
+  }
+  if (!Number.isSafeInteger(inspected.totalSats)) invalidAllowance();
+  if (d.certificate && !(await inspectCertificate(d.certificate, inspected)).ok) invalidAllowance();
+  return inspected;
+}
+async function validateAllowanceRecord(raw: any) {
+  if (!raw || raw.version !== 1 || !/^[0-9a-f]{64}$/.test(raw.txid) || typeof raw.rawHex !== "string"
+    || !/^(?:[0-9a-f]{2})+$/.test(raw.rawHex) || !Number.isSafeInteger(raw.amount) || raw.amount < 1
+    || !Number.isSafeInteger(raw.fee) || raw.fee < 0) invalidAllowance();
+  const inspected = await validateStoredDescriptor(raw.descriptor);
+  const d = raw.descriptor;
+  if (!d.certificate || !asRecord(d.masterKeyring) || !Object.keys(d.certificate.fields).every(k =>
+    typeof d.masterKeyring[k] === "string" && d.masterKeyring[k].length > 0) || inspected.totalSats !== raw.amount) invalidAllowance();
+  const tx = Transaction.fromHex(raw.rawHex);
+  if (tx.id("hex") !== raw.txid || tx.toHex() !== raw.rawHex || tx.inputs.length === 0
+    || tx.inputs.some(i => !i.unlockingScript || i.unlockingScript.toHex().length === 0)) invalidAllowance();
+  let ownerPub: string | undefined;
+  for (const o of d.outputs) {
+    const point = parseOutpoint(o.outpoint);
+    const output = tx.outputs[point.vout];
+    if (point.txid !== raw.txid || !output || output.satoshis !== o.satoshis) invalidAllowance();
+    const lock = parseAllowanceLock(output.lockingScript.toHex());
+    if (!lock.ok || (ownerPub && ownerPub !== lock.ownerPubHex)) invalidAllowance();
+    ownerPub = lock.ownerPubHex;
+  }
+  const point = parseOutpoint(d.revocationOutpoint);
+  const output = tx.outputs[point.vout];
+  if (point.txid !== raw.txid || !output || output.satoshis !== 1
+    || output.lockingScript.toHex() !== revocationScriptHex(ownerPub!)) invalidAllowance();
+}
+async function loadAllowanceRecords(root: string, selection?: string): Promise<StoredAllowance[]> {
+  try {
+    const paths = vaultPaths(root);
+    const records: StoredAllowance[] = [];
+    if ((!selection || selection === "legacy") && allowancePresent(paths.allowance)) {
+      const descriptor = JSON.parse(readFileSync(paths.allowance, "utf8"));
+      await validateStoredDescriptor(descriptor);
+      records.push({ recordId: "legacy", status: "legacy", descriptor, txid: parseOutpoint(descriptor.revocationOutpoint).txid });
+    }
+    if (allowancePresent(paths.allowances)) {
+      const names = readdirSync(paths.allowances).sort();
+      for (const name of names) {
+        if (selection && name !== `${selection}.json`) continue;
+        if (!/^[0-9a-f]{64}(\.accounted)?\.json$/.test(name)) invalidAllowance();
+        if (name.endsWith(".accounted.json")) {
+          if (!names.includes(name.replace(".accounted.json", ".json"))) invalidAllowance();
+          continue;
+        }
+        const row = JSON.parse(readFileSync(join(paths.allowances, name), "utf8"));
+        await validateAllowanceRecord(row);
+        if (`${row.txid}.json` !== name || records.some(r => r.txid === row.txid)) invalidAllowance();
+        let status: StoredAllowance["status"] = "unresolved";
+        const receipt = join(paths.allowances, `${row.txid}.accounted.json`);
+        if (!selection && allowancePresent(receipt)) {
+          const done = JSON.parse(readFileSync(receipt, "utf8"));
+          if (done?.version !== 1 || done.txid !== row.txid) invalidAllowance();
+          status = "accounted";
+        }
+        records.push({ recordId: row.txid, status, fee: row.fee, descriptor: row.descriptor, txid: row.txid });
+      }
+    }
+    return records;
+  } catch { invalidAllowance(); }
+}
+
+/** Owner-only, sanitized, offline inventory; never returns keyring or signed bytes. */
+export async function listAllowances(root: string) {
+  return (await loadAllowanceRecords(root)).map(r => ({ recordId: r.recordId, status: r.status,
+    txid: r.txid, allowanceId: r.descriptor.allowanceId, amount: r.descriptor.outputs.reduce((s: number, o: any) => s + o.satoshis, 0) }));
+}
+
+export type FundOptions = {
   root: string;
   agentPubHex: string;
   amount: number;
@@ -302,7 +408,37 @@ export async function fundAllowance(opts: {
   fetchUtxos?: (address: string) => Promise<Utxo[]>;
   fetchTxHex?: (txid: string) => Promise<string>;
   broadcast?: (raw: string) => Promise<{ txid: string }>;
-}): Promise<FundResult> {
+};
+
+export async function fundAllowance(opts: FundOptions): Promise<FundResult> {
+  try {
+    return await withPaymentGuard(opts.root, "allowance-fund", guard => fundAllowanceGuarded(opts, guard));
+  } catch (e) {
+    if (e instanceof PaymentHeldError) return { ok: false, code: e.code, message: e.message };
+    throw e;
+  }
+}
+
+async function fundAllowanceGuarded(opts: FundOptions, guard: PaymentGuard): Promise<FundResult> {
+  const records = await loadAllowanceRecords(opts.root);
+  if (records.some(r => r.status === "unresolved")) throw new PaymentHeldError();
+  // A completion marker is not authority to reconstruct missing or duplicate accounting.
+  try {
+    const completed = records.filter(r => r.status === "accounted");
+    if (completed.length) {
+      const rows = readFileSync(vaultPaths(opts.root).log, "utf8").split(/\r?\n/).flatMap(line => {
+        try { return [JSON.parse(line)]; } catch { return []; }
+      });
+      for (const r of completed) {
+        const matching = rows.filter(row => row?.txid === r.txid && row?.kind === "allowance-fund");
+        const amount = r.descriptor.outputs.reduce((s: number, o: any) => s + o.satoshis, 0);
+        if (matching.length !== 1 || matching[0].amount !== amount || matching[0].fee !== r.fee
+          || (matching[0].asset !== undefined && matching[0].asset !== "bsv")
+          || typeof matching[0].paymentId !== "string" || !/^[0-9a-f-]{36}$/.test(matching[0].paymentId)
+          || !Number.isFinite(Date.parse(matching[0].t))) invalidAllowance();
+      }
+    }
+  } catch { invalidAllowance(); }
   const vault = loadVault(opts.root);
   const decision = evaluateAllowanceFund(vault.policy, opts.amount, loadUsage(opts.root));
   if (!decision.ok) return decision;
@@ -329,6 +465,17 @@ export async function fundAllowance(opts: {
   const keys = deriveAllowanceKeys(vault.key, agentIdentity, allowanceId);
 
   const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
+  const seen = new Set<string>();
+  let available = 0;
+  for (const u of utxos) {
+    const point = `${u.tx_hash}.${u.tx_pos}`;
+    available += u.value;
+    if (!/^[0-9a-f]{64}$/.test(u.tx_hash) || !Number.isSafeInteger(u.tx_pos) || u.tx_pos < 0
+      || !Number.isSafeInteger(u.value) || u.value < 1 || !Number.isSafeInteger(available) || seen.has(point)) {
+      throw new Error("Invalid allowance funding UTXO metadata");
+    }
+    seen.add(point);
+  }
   const need = opts.amount + 1;
   const { chosen, fee, total } = selectUtxos(utxos, need);
   const outCount = pieces + 2;
@@ -346,6 +493,11 @@ export async function fundAllowance(opts: {
   for (const u of chosen) {
     const hex = await fetchTxHex(u.tx_hash);
     const source = Transaction.fromHex(hex);
+    const output = source.outputs[u.tx_pos];
+    if (source.id("hex") !== u.tx_hash || !output || output.satoshis !== u.value
+      || output.lockingScript.toHex() !== new P2PKH().lock(vault.address).toHex()) {
+      throw new Error("Invalid allowance funding source transaction");
+    }
     tx.addInput({
       sourceTransaction: source,
       sourceTXID: u.tx_hash,
@@ -365,6 +517,8 @@ export async function fundAllowance(opts: {
   if (change > 1) {
     tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(vault.address) });
   }
+  const paidFee = total - tx.outputs.reduce((sum, o) => sum + o.satoshis!, 0);
+  guard.reserve({ asset: "bsv", amount: opts.amount, to: vault.address, fee: paidFee });
   await tx.sign();
   const rawHex = tx.toHex();
   const txid = tx.id("hex") as string;
@@ -377,8 +531,6 @@ export async function fundAllowance(opts: {
     revocationOutpoint,
   });
   if (!issued.ok) return issued;
-  await (opts.broadcast ?? defaultBroadcast)(rawHex);
-
   const outputs = Array.from({ length: pieces }, (_, i) => ({
     outpoint: `${txid}.${i}`,
     satoshis: base + (i < rem ? 1 : 0),
@@ -395,24 +547,23 @@ export async function fundAllowance(opts: {
     certificate: issued.certificate,
     masterKeyring: issued.masterKeyring,
   };
-  writeFileSync(join(opts.root, "allowance.json"), `${JSON.stringify(descriptor, null, 2)}\n`, { mode: 0o644 });
-  const paths = vaultPaths(opts.root);
-  appendFileSync(
-    paths.log,
-    `${JSON.stringify({
-      t: new Date().toISOString(),
-      txid,
-      amount: opts.amount,
-      fee: actualFee,
-      note: "allowance-fund",
-      kind: "allowance-fund",
-    })}\n`,
-  );
-  return { ok: true, txid, amount: opts.amount, fee: actualFee, rawHex, descriptor };
+  const directory = vaultPaths(opts.root).allowances;
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  syncAllowanceDirectory(opts.root);
+  const record = { version: 1, txid, rawHex, amount: opts.amount, fee: paidFee, descriptor };
+  await validateAllowanceRecord(record);
+  writeAllowanceFile(join(directory, `${txid}.json`), record);
+  const acknowledged = await (opts.broadcast ?? defaultBroadcast)(rawHex);
+  if (acknowledged.txid !== txid) throw new Error("Ambiguous allowance broadcast acknowledgement; hold retained.");
+  guard.log({ t: new Date().toISOString(), txid, amount: opts.amount, fee: paidFee, note: "allowance-fund", kind: "allowance-fund" });
+  writeAllowanceFile(join(directory, `${txid}.accounted.json`), { version: 1, txid });
+  const { masterKeyring: _private, ...publicDescriptor } = descriptor;
+  return { ok: true, txid, amount: opts.amount, fee: paidFee, rawHex, descriptor: publicDescriptor };
 }
 
 export async function sweepAllowance(opts: {
   root: string;
+  recordId?: string;
   to?: string;
   fetchTxHex?: (txid: string) => Promise<string>;
   broadcast?: (raw: string) => Promise<{ txid: string }>;
@@ -421,13 +572,19 @@ export async function sweepAllowance(opts: {
   const to = opts.to ?? vault.address;
   const dest = evaluateSweep(vault.policy, to);
   if (!dest.ok) return dest;
-  const path = join(opts.root, "allowance.json");
-  if (!existsSync(path)) {
-    return { ok: false, code: "NEED_ALLOWANCE", message: "REJECTED: No allowance.json. Fund one first." };
+  const records = await loadAllowanceRecords(opts.root, opts.recordId);
+  if (records.length === 0) {
+    return { ok: false, code: "NEED_ALLOWANCE", message: "REJECTED: No saved allowance." };
   }
-  const descriptor = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  if (!opts.recordId && records.length !== 1) {
+    return { ok: false, code: "SELECT_ALLOWANCE", message: "REJECTED: Multiple allowances. Use allowance-list and select a record ID explicitly." };
+  }
+  const selected = opts.recordId ? records.find(r => r.recordId === opts.recordId) : records[0];
+  if (!selected) return { ok: false, code: "SELECT_ALLOWANCE", message: "REJECTED: Unknown allowance record ID." };
+  const descriptor = selected.descriptor;
   const inspected = inspectDescriptor(descriptor);
   if (!inspected.ok) return inspected;
+  if (inspected.ownerIdentityKey !== vault.key.toPublicKey().toString().toLowerCase()) invalidAllowance();
 
   const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
   const rec = descriptor as {
@@ -458,6 +615,11 @@ export async function sweepAllowance(opts: {
       hexCache.set(p.txid, hex);
     }
     const source = Transaction.fromHex(hex);
+    const output = source.outputs[p.vout];
+    const expectedScript = p.kind === "allowance" ? lockingScriptHex(keys.agentPubHex, keys.ownerPubHex) : revocationScriptHex(keys.ownerPubHex);
+    if (source.id("hex") !== p.txid || !output || output.satoshis !== p.satoshis || output.lockingScript.toHex() !== expectedScript) {
+      throw new Error("Invalid allowance sweep source transaction");
+    }
     tx.addInput({
       sourceTransaction: source,
       sourceTXID: p.txid,
@@ -470,6 +632,7 @@ export async function sweepAllowance(opts: {
   await tx.sign();
   const rawHex = tx.toHex();
   const { txid } = await (opts.broadcast ?? defaultBroadcast)(rawHex);
+  if (txid !== tx.id("hex")) throw new Error("Ambiguous allowance sweep acknowledgement; reconcile before retry.");
   const paths = vaultPaths(opts.root);
   appendFileSync(
     paths.log,
@@ -483,7 +646,8 @@ export async function sweepAllowance(opts: {
       kind: "allowance-sweep",
     })}\n`,
   );
-  return { ok: true, txid, amount: total - fee, fee, rawHex, descriptor: rec };
+  const { masterKeyring: _private, ...publicDescriptor } = descriptor;
+  return { ok: true, txid, amount: total - fee, fee, rawHex, descriptor: publicDescriptor };
 }
 
 function parseOutpoint(outpoint: string): { txid: string; vout: number } {

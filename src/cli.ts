@@ -4,7 +4,7 @@ import type { BridgeProvider } from "./bridge";
 import { sendPayment, sweepPayment, splitPayment, sendRaw } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
 import { delegateX402 } from "./x402-delegate";
-import { inspectDescriptor, lockingScriptHex, revocationScriptHex, fundAllowance, sweepAllowance } from "./allowance";
+import { inspectDescriptor, lockingScriptHex, revocationScriptHex, fundAllowance, sweepAllowance, listAllowances } from "./allowance";
 import { fundRequest } from "./fund-request";
 import { verifyPolicyEnvelope } from "./brc181";
 import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault, vaultPaths } from "./vault";
@@ -45,7 +45,9 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts allowance-script <agent-pubkey-hex> <owner-pubkey-hex>
   bun src/cli.ts allowance-inspect <descriptor-json-or-file>
   bun src/cli.ts allowance-fund <agent-pubkey-hex> <sats> [pieces]
+  bun src/cli.ts allowance-list
   bun src/cli.ts allowance-sweep [p2pkh-address]
+  bun src/cli.ts allowance-sweep --record <record-id> [p2pkh-address]
   bun src/cli.ts policy-inspect <envelope-json-or-file>
   bun src/cli.ts mcp
   bun src/cli.ts mcp-http
@@ -247,8 +249,13 @@ async function main() {
       console.log(JSON.stringify({ txid: result.txid, amount: result.amount, fee: result.fee, descriptor: publicDescriptor }, null, 2));
       break;
     }
+    case "allowance-list": {
+      console.log(JSON.stringify(await listAllowances(root), null, 2));
+      break;
+    }
     case "allowance-sweep": {
-      const result = await sweepAllowance({ root, to: a });
+      if (a === "--record" && !b) die("Usage: allowance-sweep --record <record-id> [p2pkh-address]");
+      const result = await sweepAllowance({ root, to: a === "--record" ? rest[0] : a, recordId: a === "--record" ? b : undefined });
       if (!result.ok) die(result.message);
       console.log(`txid: ${result.txid}`);
       console.log(`swept: ${result.amount} sats (fee ${result.fee})`);

@@ -4,7 +4,8 @@
 
 `sendPayment` (CLI/MCP send) and shared `payX402` (CLI `x402-pay`, MCP
 `x402_pay`, BSV/Base/Solana), and `delegateX402` (CLI `x402-delegate`, MCP
-`x402_delegate`), plus owner-only `splitPayment` (CLI `split`), share one
+`x402_delegate`), plus owner-only `splitPayment` (CLI `split`) and
+`fundAllowance` (CLI `allowance-fund`), share one
 per-vault exclusive `payment.lock`.
 It is acquired using exclusive filesystem creation **before** loading policy
 and usage; contenders fail immediately with `PAYMENT_HELD`, without signing
@@ -91,22 +92,104 @@ No hold-clear tool is registered.
 
 **Excluded:** direct `settleX402`/`buildClientFundedPartialTx` library calls
 without guarded orchestration, raw `sendRaw` and bridge
-rebalance, allowance funding/sweeping, owner sweep, fee delegator and
+rebalance, allowance sweeping, owner sweep, fee delegator and
 merchant replay state. Direct library rail calls without the orchestration
 callbacks are also outside the guard. Do not run excluded spenders concurrently
-with guarded payments or use them to bypass a hold. Allowance semantics are
-unchanged. In particular, `fundAllowance` currently signs, issues its certificate,
-broadcasts, then overwrites a single `allowance.json` and appends its spend row.
-It has no durable per-allowance certificate/revocation recovery journal and can
-replace the previous allowance descriptor. Wrapping only the broadcast/log in
-a guard would not provide complete crash recovery for that lifecycle. Funding
-integration is deferred in full: it needs securely persisted descriptor/keyring
-material separate from non-secret intents, preservation of prior allowances,
-and exactly-once accounting/recovery across certificate persistence failures.
-Existing allowance amount caps, intentional empty-allowlist bypass for owner
-script funding, and kill gating are unchanged, not newly guard-protected.
-A follow-up must integrate those independently; this change does
-not claim cross-wallet, distributed, or adversarial-filesystem safety.
+with guarded payments or use them to bypass a hold. This is not cross-wallet,
+distributed, or adversarial-filesystem protection.
+
+## Allowance funding lifecycle
+
+`fundAllowance` takes the shared lock before archive, policy and usage reads.
+It retains amount-cap and kill gating; owner script funding still intentionally
+ignores the destination allowlist (including an empty allowlist) and BRC-181
+agent-send policy. BRC-204 locks, Type42 derivation and BRC-52 certificate
+issuance/revocation binding are unchanged. Caps charge the allowance amount;
+the one-sat revocation and actual miner fee remain separate, as before.
+
+The bounded state sequence is:
+
+1. Validate saved state, then policy and selected source transactions. Verify
+   source txid, output index/value, vault P2PKH script, unique outpoints and safe
+   integer totals. This does not independently prove inputs are still unspent.
+2. Fsync the ordinary non-secret payment intent (`operation: allowance-fund`,
+   asset BSV, allowance amount, vault address, actual fee) **before signing**.
+3. Sign, compute the funding txid, issue the certificate, then exclusively create
+   and fsync `allowances/<txid>.json`: version 1, txid, signed rawHex, amount, fee
+   and the full descriptor including certificate, revocation and masterKeyring.
+   No broadcaster call occurs before that file is durable. Files request 0600;
+   the new directory requests 0700. These are **private recovery artifacts**, not
+   public descriptors. Protect Windows vault directories with appropriate ACLs.
+4. Require the broadcaster's returned txid to exactly match the signed txid.
+   Append/fsync one `allowance-fund` accounting row with the guard's paymentId.
+5. Exclusively create/fsync `<txid>.accounted.json` containing version 1 and txid,
+   then allow the guard to remove pending/lock. Marker failure after accounting
+   deliberately retains the hold: the spend may already be counted.
+
+Failures at/after reservation retain the shared hold, including certificate or
+record persistence failures before broadcast. Process death at the record
+stage or after broadcast/accounting retains signed identification and recovery
+metadata. If death precedes durable record creation, the intent/lock remains,
+but no broadcaster has been called by this path; missing record contents are
+never invented. A partially written record is corruption, not permission to
+continue. An ambiguous broadcaster failure retains the full pre-exposure record
+and never logs inferred success or returns a success descriptor.
+
+Every new funding is a new allowance, **not an idempotent retry API**. An unresolved
+archive blocks further funding even if someone incorrectly removes the payment
+hold. Completed archives require exactly one matching amount/fee/BSV accounting
+row with paymentId before another funding can start; missing/duplicate/conflicting
+accounting is not repaired automatically. Other guarded operations rely on the
+shared hold, not on scanning the allowance archive: deleting a hold to bypass it
+is unsupported. No automatic reconciliation, replay or hold-clear command exists.
+
+### Legacy and owner selection
+
+`allowance.json` remains read-only in place, under record ID `legacy`. No new
+funding writes that filename, and no automatic migration or accounting inference
+is made for it. Older valid descriptors without certificates remain readable;
+only available historical metadata can be preserved. Earlier descriptors already
+overwritten by old binaries, missing certificates/keyrings and unknown chain
+outputs cannot be manufactured. Do not mix old and new binaries on one vault.
+
+`allowance-list` emits only record ID, local status, txid, allowance ID and amount;
+it does not decrypt the vault key or contact a provider. `accounted` means a local
+completion marker, **not** current unspent status or independent chain settlement.
+Malformed inventory fails closed with a sanitized error, not raw file contents.
+The raw private records can be reviewed locally by the human owner, never pasted
+into agent chats, stdout or MCP. The allowance commands remain owner-only.
+
+With multiple records the default sweep refuses; use
+`allowance-sweep --record <funding-txid> [p2pkh-address]`, or `--record legacy`.
+Explicit selection validates only that descriptor/record, allowing emergency
+recovery despite an unrelated broken record or completion marker. It verifies
+owner identity and fetched source hash/index/value/derived scripts before
+signing, and checks the returned sweep txid. It does not delete records, rewrite
+receipts or clear any hold. The existing sweep is not itself crash-journaled or
+idempotent; a second sweep can fail on spent inputs and must not be retried after
+an ambiguous acknowledgement. Partial agent consumption is not handled by this
+all-listed-outputs sweep. Independently reconcile and use specialist owner
+recovery if some outputs are already spent. **Stop all spenders first**, including
+external allowance agents: a sweep is not cancellation of their authorizations.
+
+### Manual allowance reconciliation limits
+
+Preserve private records together with lock/pending and accounting evidence.
+Correlate the signed funding txid, each allowance output, revocation and actual
+chain/broadcaster evidence. Do not rebroadcast merely because a receipt/log is
+missing. Verify accounting exactly once by paymentId and txid; a crash after log
+fsync must not add the amount a second time. No recovery writer is shipped. A
+human independently reconciling a settled funding may repair durable accounting
+and its completion marker only after validating all evidence and stopping every
+spender; never treat creating a marker as settlement proof. Unsubmitted or
+unresolved records cannot be marked accounted just to enable funding. Retain
+unresolved evidence/holds and use emergency owner recovery instead. A definitive
+nonsettlement resolution needs a separately reviewed archive/recovery procedure;
+this slice intentionally favors a persistent hold over guessing.
+
+Missing/rolled-back state and noncooperating old binaries remain outside the
+protection model. File fsync is mandatory, but the Windows directory-entry/power
+loss limitation below applies to these records and completion markers too.
 
 ## Inspect without unlocking
 

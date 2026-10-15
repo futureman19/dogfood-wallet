@@ -27,6 +27,8 @@ export function vaultPaths(root: string) {
     log: join(root, "spends.jsonl"),
     bridge: join(root, "bridge.json"),
     brc181: join(root, "brc181.json"),
+    allowance: join(root, "allowance.json"),
+    allowances: join(root, "allowances"),
   };
 }
 

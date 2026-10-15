@@ -213,7 +213,7 @@ If `hold.blocked` is true, stop all spenders and follow
 reconcile settlement and exactly-once accounting before any human release.
 Do not delete `payment.lock`, `payment.pending.json` or `STOP_SPENDING` as a
 first-run fix, retry payment, or create a replacement wallet to bypass a hold.
-There is no automated recovery/clear tool. Sweep/bridge/allowance paths
+There is no automated recovery/clear tool. Emergency sweeps, bridge/raw sends and direct library paths
 are not all covered by the guard; do not use them to bypass a hold. Windows
 power-loss durability and scope limitations are detailed in the recovery guide.
 

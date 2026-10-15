@@ -128,9 +128,9 @@ USDC rails have their own blocks (`evm.usdc`, `solana.usdc`) with the same allow
 
 ## Payment concurrency and recovery
 
-CLI/MCP `send`, `x402-pay` and `x402-delegate`, plus owner-only `split`, share a per-vault cross-process lock acquired before policy/usage reads. A durable pending intent is recorded before signing; uncertain outcomes retain a hold instead of permitting another payment. Successful payments release it only after durable spend accounting. Split records zero transferred amount and its miner fee separately: all outputs return to the vault, and no amount or fee is charged to daily/lifetime spend caps. Kill still blocks split. Inspect without unlocking with `bun src/cli.ts payment-inspect`.
+CLI/MCP `send`, `x402-pay` and `x402-delegate`, plus owner-only `split` and `allowance-fund`, share a per-vault cross-process lock acquired before policy/usage reads. A durable pending intent is recorded before signing; uncertain outcomes retain a hold instead of permitting another payment. Successful payments release it only after durable spend accounting. Split records zero transferred amount and its miner fee separately: all outputs return to the vault, and no amount or fee is charged to daily/lifetime spend caps. Kill still blocks split. Inspect without unlocking with `bun src/cli.ts payment-inspect`.
 
-This does **not** cover direct lower-level library helpers, bridge/`sendRaw`, allowance funding, fee delegator or merchant replay state. Allowance funding still needs durable certificate/descriptor lifecycle recovery; it is not partially integrated here. Do not run excluded spenders concurrently with guarded payments or use them to bypass a hold. Emergency owner `sweep` and `allowance-sweep` deliberately bypass the guard; **stop all spenders first** because sweeping does not cancel an in-flight payment. Kill remains available. There is no automatic hold expiry or clear command. See [payment recovery and scope limitations](docs/payment-recovery.md) before operating unattended.
+This does **not** cover direct lower-level library helpers, bridge/`sendRaw`, fee delegator or merchant replay state. Allowance funding preserves private per-funding recovery records before broadcast and releases only after durable accounting and a completion marker. Do not run excluded spenders concurrently with guarded payments or use them to bypass a hold. Emergency owner `sweep` and `allowance-sweep` deliberately bypass the guard; **stop all spenders first** because sweeping does not cancel an in-flight payment. Kill remains available. There is no automatic hold expiry or clear command. See [payment recovery and scope limitations](docs/payment-recovery.md) before operating unattended.
 
 ## Merkle Works x402 (payer)
 
@@ -161,10 +161,16 @@ Human-only. Not MCP. Owner identity is the vault key. Allowance locking keys are
 
 ```bash
 bun src/cli.ts allowance-fund <agent-pubkey-hex> <sats> [pieces]
+bun src/cli.ts allowance-list
 bun src/cli.ts allowance-sweep [p2pkh-address]
+bun src/cli.ts allowance-sweep --record <record-id> [p2pkh-address]
 ```
 
-`allowance-fund` spends vault coins into the two-branch lock plus a 1-sat revocation output. Counts against sat caps. Killfile blocks it. Empty allowlist does **not** (destination is a script). `allowance-sweep` spends the owner branch + revocation even if the killfile is on.
+`allowance-fund` spends vault coins into the two-branch lock plus a 1-sat revocation output. Counts against sat caps. Killfile blocks it. Empty allowlist does **not** (destination is a script). `allowance-sweep` spends the owner branch + revocation even if the killfile or payment hold is on. **Stop all spenders first.**
+
+New funding writes immutable, private `allowances/<funding-txid>.json` (signed transaction, descriptor, certificate and master keyring) before broadcast, and `<funding-txid>.accounted.json` only after matching broadcaster acknowledgement and fsynced accounting. Repeated funding never replaces earlier records. `allowance-list` is sanitized/offline; its `accounted` status is a local completion marker, not confirmation or unspent status. Results/CLI output exclude the master keyring. New files request mode 0600 and the directory 0700; Windows owners must protect the vault with filesystem ACLs.
+
+Existing `allowance.json` is read in place as record ID `legacy`, never overwritten or silently migrated. Missing historical descriptors/keyrings cannot be reconstructed. With multiple records, sweeping requires `--record <funding-txid>` or `--record legacy`; the default refuses ambiguity. Sweeps preserve all history and do not resolve funding holds. Explicit selection can recover a valid record despite unrelated corrupt history. Ambiguous funding is **not retryable**: no automatic rebroadcast, accounting repair, hold clearing, or delegated allowance-spending feature is provided. See [recovery limits](docs/payment-recovery.md#allowance-funding-lifecycle).
 
 ## BRC-181 policy inspect
 

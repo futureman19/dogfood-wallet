@@ -335,7 +335,7 @@ describe("fundAllowance", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       const funded = Transaction.fromHex(raw);
-      const saved = JSON.parse(readFileSync(join(root, "allowance.json"), "utf8"));
+      const saved = JSON.parse(readFileSync(join(root, "allowances", `${result.txid}.json`), "utf8")).descriptor;
       const keys = deriveAllowanceKeys(vault.key, agent, saved.allowanceId);
       const lock = lockingScriptHex(keys.agentPubHex, keys.ownerPubHex);
       const rev = revocationScriptHex(keys.ownerPubHex);
