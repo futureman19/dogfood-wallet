@@ -81,11 +81,24 @@ independently verify the intended merchant's **BSV mainnet P2PKH** address and
 run `bun src/cli.ts allow 'VERIFIED_MERCHANT_ADDRESS'` instead. Do not paste the
 placeholder. `allow` is BSV-only; it is not a universal per-chain allow command.
 It authorizes a destination, not a payment, and is not exposed through MCP.
+Only the top-level BSV `allowlist` is changed; caps, `evm`, `solana`, `bridge`
+and unknown extension fields are preserved. Adding an existing destination is
+an unchanged-file no-op. A legacy omitted/null `allowlist` is unrestricted on
+load; running `allow` intentionally replaces that with a restricted list
+containing the requested destination (the existing command semantics).
 
 Human-edit `policy.json` only with agents stopped if you need different caps.
 Keep `allowlist` explicit; omitted/null means legacy **unrestricted** behavior.
-Missing/malformed policy is not a safe substitute for an empty allowlist.
-Doctor flags missing/invalid policy but does not repair or change signer behavior.
+A missing file retains legacy load defaults, but `allow` refuses to recreate it.
+Malformed JSON and null/array/primitive policy roots fail closed on load and
+allow. An unreadable file is not replaced; `allow` also refuses malformed BSV
+allowlist values and duplicate top-level allowlist keys instead of normalizing
+them. Doctor flags missing/invalid policy but does not repair it.
+`allow` writes a flushed sibling temporary file and renames it over the policy;
+this avoids exposing a partial write, but is **not a concurrent-editor lock**.
+Stop spenders and other policy writers before editing or running `allow`;
+concurrent edits can still be lost. No directory-fsync or Windows power-loss
+guarantee is claimed.
 BSV caps are satoshis, not dollars; daily accounting uses UTC. A `null` lifetime
 cap means none. Doctor summarizes BSV policy only and does not validate BRC-181
 signatures or USDC policy blocks.
@@ -210,9 +223,10 @@ power-loss durability and scope limitations are detailed in the recovery guide.
   `sol-address`), separate network/token funding, and explicit human-configured
   `evm.usdc` / `solana.usdc` blocks in `policy.json`. Disabled by default. Do not
   fund a chain merely because an address can be derived. Review the README's
-  x402 rail notes first. Current BSV `allow` rewrites the BSV policy file and can
-  drop optional policy blocks; configure/review those blocks after BSV allowlist
-  changes, with agents stopped. This guide does not exercise USDC funding.
+  x402 rail notes first. BSV `allow` preserves these optional blocks but does
+  not authorize USDC destinations or enable a pocket. Configure/review each
+  chain's policy separately with agents stopped. This guide does not exercise
+  USDC funding.
 - **Merkle Works delegation:** set a trusted `DOGFOOD_X402_DELEGATOR_URL` only
   when you actually need that separate protocol. It is not an MCP endpoint.
   Funded delegation is deliberately restricted to one UTXO, positive change and

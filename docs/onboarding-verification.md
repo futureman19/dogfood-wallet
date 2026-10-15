@@ -101,9 +101,13 @@ these are not live settlement evidence.
   auto-install), decrypt, authorize, mutate or fetch. Standalone mode remains
   available before dependencies are installed; normal CLI imports still need
   dependencies. Exit zero means report generated, not safe-to-spend.
-- Current BSV `allow` can drop optional policy blocks. This is documented, not
-  redesigned here. Missing/malformed/legacy policy handling in the signer is
-  likewise unchanged; diagnostics must not be mistaken for enforcement.
+- BSV `allow` now edits only the top-level BSV allowlist, preserving optional
+  multichain blocks and unknown nested data. Disposable-vault library and real
+  CLI regressions cover preservation, duplicate no-ops, and corrupt-policy
+  refusal. Invalid JSON/non-object roots fail closed; missing-file legacy load
+  defaults remain, but `allow` will not recreate a missing policy. This is not
+  universal multichain authorization or a concurrent-policy-editor lock;
+  diagnostics must not be mistaken for enforcement.
 - Manual gates remain: secure persistent storage/backup and OS permissions,
   human merchant verification/policy review, funding, online balance/settlement,
   actual chosen-client setup/approvals and any forensic hold reconciliation.

@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PrivateKey } from "@bsv/sdk";
@@ -78,13 +78,21 @@ function optionalCap(value: unknown): number | null {
   return null;
 }
 
-function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
-  let parsed: Record<string, unknown> = {};
+function parsePolicyObject(raw: string): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw) as Record<string, unknown>;
+    parsed = JSON.parse(raw);
   } catch {
-    parsed = {};
+    throw new Error("Invalid policy.json: expected a JSON object. Refusing to use defaults.");
   }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Invalid policy.json: expected a JSON object. Refusing to use defaults.");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
+  const parsed = parsePolicyObject(raw);
   const maxSatsPerTx =
     typeof parsed.maxSatsPerTx === "number" && parsed.maxSatsPerTx > 0 ? parsed.maxSatsPerTx : DEFAULT_MAX_SATS;
   const allowlist = Array.isArray(parsed.allowlist)
@@ -155,12 +163,71 @@ function writePolicyFile(root: string, policy: Policy): void {
   );
 }
 
+// Only call after validating JSON and the BSV allowlist shape. Locate its raw
+// value so unknown fields, large numbers, escaped keys and formatting survive.
+function allowlistSpan(raw: string): { start: number; end: number } | undefined {
+  const tokens = [...raw.matchAll(/"(?:\\[\s\S]|[^"\\])*"|[{}\[\]:,]|[^\s{}\[\]:,]+/g)];
+  let depth = 0;
+  let span: { start: number; end: number } | undefined;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    const text = token[0];
+    if (depth === 1 && text.startsWith('"') && tokens[i + 1]?.[0] === ":" && JSON.parse(text) === "allowlist") {
+      if (span) throw new Error("Invalid policy.json: duplicate BSV allowlist keys.");
+      const first = tokens[i + 2]!;
+      let j = i + 2;
+      // The validated value is either null or an array of strings.
+      if (first[0] === "[") while (tokens[j]![0] !== "]") j++;
+      const last = tokens[j]!;
+      span = { start: first.index!, end: last.index! + last[0].length };
+    }
+    if (text === "{" || text === "[") depth++;
+    if (text === "}" || text === "]") depth--;
+  }
+  return span;
+}
+
+function replacePolicyAtomically(path: string, raw: string): void {
+  const temp = `${path}.${randomBytes(12).toString("hex")}.tmp`;
+  // Same-directory rename avoids exposing truncated policy to readers. This is
+  // not a concurrent-editor lock or a directory-fsync/power-loss guarantee.
+  const fd = openSync(temp, "wx", statSync(path).mode & 0o777);
+  try {
+    try {
+      writeFileSync(fd, raw, "utf8");
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(temp, path);
+  } finally {
+    if (existsSync(temp)) unlinkSync(temp);
+  }
+}
+
 export function allowDestination(root: string, address: string): string[] {
   if (!isValidAddress(address)) throw new Error("Not a mainnet P2PKH address.");
-  const loaded = loadVault(root);
-  const list = loaded.policy.allowlist === null ? [] : [...loaded.policy.allowlist];
-  if (!list.includes(address)) list.push(address);
-  writePolicyFile(root, { ...loaded.policy, allowlist: list });
+  const path = vaultPaths(root).policy;
+  // Unlike legacy reads, an administrative mutation requires an existing file.
+  // Never reconstruct persisted configuration from the normalized runtime view.
+  const raw = readFileSync(path, "utf8");
+  const stored = parsePolicyObject(raw);
+  const existing = stored.allowlist;
+  if (existing !== undefined && existing !== null &&
+      (!Array.isArray(existing) || !existing.every(a => typeof a === "string"))) {
+    throw new Error("Invalid policy.json: BSV allowlist must be an array of strings or null.");
+  }
+  const span = allowlistSpan(raw);
+  loadVault(root); // Retain the existing initialized/key/address integrity check.
+  const list = existing == null ? [] : [...existing as string[]];
+  if (list.includes(address)) return list;
+  list.push(address);
+  const value = JSON.stringify(list);
+  const end = raw.lastIndexOf("}");
+  const updated = span
+    ? raw.slice(0, span.start) + value + raw.slice(span.end)
+    : raw.slice(0, end) + `${Object.keys(stored).length ? "," : ""}"allowlist":${value}` + raw.slice(end);
+  replacePolicyAtomically(path, updated);
   return list;
 }
 
