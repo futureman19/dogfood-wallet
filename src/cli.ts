@@ -21,6 +21,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts address
   bun src/cli.ts balance
   bun src/cli.ts status
+  bun src/cli.ts doctor
   bun src/cli.ts payment-inspect
   bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [note]
@@ -101,6 +102,11 @@ async function main() {
     case "balance":
       await cmdBalance(root);
       break;
+    case "doctor": {
+      const { doctor } = await import("./doctor");
+      console.log(JSON.stringify(doctor(root), null, 2));
+      break;
+    }
     case "payment-inspect": {
       const { inspectPaymentHold } = await import("./payment-guard");
       console.log(JSON.stringify(inspectPaymentHold(root), null, 2));

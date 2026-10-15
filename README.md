@@ -24,16 +24,18 @@ There is no `refund` tool. Sweep/recovery is the owner's job, not the agent's.
 
 ## Install
 
+**New here? Start with the [BSV-first quickstart](docs/quickstart.md): isolated vault selection, deny-by-default policy, agent connection and offline recovery diagnostics. No funding or payment is needed for the rehearsal.**
+
 Needs [Bun](https://bun.sh).
 
 ```bash
 git clone https://github.com/futureman19/dogfood-wallet
 cd dogfood-wallet
-bun install
-bun src/cli.ts init
+bun install --frozen-lockfile
+# Next: follow the quickstart to select an isolated vault before init/doctor.
 ```
 
-Fund the printed address. Default vault: `~/.dogfood-wallet` (override with `DOGFOOD_WALLET_DIR`). New vaults: **10,000 sats/tx**, **50,000 sats/day**, **empty allowlist** (a human must `allow` a destination before the agent can send). EVM and Solana addresses derive from the same secret — print them with `evm-address` / `sol-address`.
+The default vault is `~/.dogfood-wallet`; override with an absolute `DOGFOOD_WALLET_DIR` to avoid selecting the wrong vault. New vaults: **10,000 sats/tx**, **50,000 sats/day**, **empty allowlist** (a human must `allow` a BSV destination before the agent can send). EVM and Solana are optional tracks, not prerequisites. Never fund a disposable rehearsal vault.
 
 ```bash
 bun src/cli.ts address                 # BSV
@@ -41,7 +43,8 @@ bun src/cli.ts evm-address             # Base/EVM
 bun src/cli.ts sol-address             # Solana
 bun src/cli.ts balance                 # plus evm-balance / sol-balance
 bun src/cli.ts status
-bun src/cli.ts allow <address>         # per-chain policy blocks
+bun src/cli.ts doctor                 # offline metadata, no key decryption
+bun src/cli.ts allow <address>         # BSV P2PKH only; human-only
 bun src/cli.ts send <p2pkh-address> <sats> [note]
 bun src/cli.ts fund-request <sats>
 # or paste that address into the Yours button on https://dogfoodwallet.com
@@ -83,21 +86,21 @@ The merchant validates before settling: amount, payee, mint, unspent inputs, non
 bun src/cli.ts mcp
 ```
 
-Claude Desktop / Cursor example:
+Claude Desktop example (replace all absolute paths; no client `cwd` support assumed):
 
 ```json
 {
   "mcpServers": {
     "dogfood-wallet": {
-      "command": "bun",
-      "args": ["src/cli.ts", "mcp"],
-      "cwd": "/absolute/path/to/dogfood-wallet"
+      "command": "/absolute/path/to/bun",
+      "args": ["/absolute/path/to/dogfood-wallet/src/cli.ts", "mcp"],
+      "env": { "DOGFOOD_WALLET_DIR": "/absolute/path/to/selected/vault" }
     }
   }
 }
 ```
 
-Hermes: same command, or `bun src/mcp.ts`.
+Use your client's documented config schema, with the same absolute executable/script paths and explicit vault environment. See the [connection walkthrough](docs/quickstart.md#4-connect-one-agent-choose-stdio-or-http).
 
 `x402_pay({ url })` uses the same payment orchestration as CLI `x402-pay`: **BSV sats → Base USDC → Solana USDC**, falling through only on `UNSUPPORTED`. Policy, funding, and settlement errors stop immediately. Caps, allowlists, killfile, optional BRC-181 checks for BSV, and per-asset spend logs apply on both surfaces. Base and Solana require human-configured `evm.usdc` / `solana.usdc` policy blocks. Success returns the selected rail's CLI result shape; failures return `isError: true` with `{ ok: false, code, message }`.
 
