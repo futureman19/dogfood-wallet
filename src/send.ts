@@ -126,6 +126,18 @@ export async function sendPayment(opts: {
       if (!pre.ok) return pre;
 
       const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
+      const outpoints = new Set<string>();
+      let available = 0;
+      for (const u of utxos) {
+        const outpoint = `${u.tx_hash}.${u.tx_pos}`;
+        if (!/^[0-9a-f]{64}$/.test(u.tx_hash) || !Number.isSafeInteger(u.tx_pos) || u.tx_pos < 0
+          || !Number.isSafeInteger(u.value) || u.value <= 0 || outpoints.has(outpoint)) {
+          throw new Error("Invalid send source metadata");
+        }
+        outpoints.add(outpoint);
+        available += u.value;
+        if (!Number.isSafeInteger(available)) throw new Error("Invalid send source total");
+      }
       const { chosen, fee: estimatedFee, total } = selectUtxos(utxos, opts.amount);
       if (chosen.length === 0 || total < opts.amount + estimatedFee) {
         return {
@@ -148,9 +160,16 @@ export async function sendPayment(opts: {
 
       const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
       const tx = new Transaction();
+      const ownScript = new P2PKH().lock(vault.address).toHex();
       for (const u of chosen) {
         const hex = await fetchTxHex(u.tx_hash);
         const source = Transaction.fromHex(hex);
+        const output = source.outputs[u.tx_pos];
+        // Bind change and fee authorization to the actual signed input value.
+        if (source.id("hex") !== u.tx_hash || !output || output.satoshis !== u.value
+          || output.lockingScript.toHex() !== ownScript) {
+          throw new Error("Invalid send source transaction");
+        }
         tx.addInput({
           sourceTransaction: source,
           sourceTXID: u.tx_hash,
