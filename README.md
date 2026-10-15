@@ -128,9 +128,9 @@ USDC rails have their own blocks (`evm.usdc`, `solana.usdc`) with the same allow
 
 ## Payment concurrency and recovery
 
-CLI/MCP `send`, `x402-pay` and `x402-delegate` share a per-vault cross-process lock. A durable pending intent is recorded before signing; uncertain outcomes retain a hold instead of permitting another payment. Successful payments release it only after durable spend accounting. Inspect without unlocking with `bun src/cli.ts payment-inspect`.
+CLI/MCP `send`, `x402-pay` and `x402-delegate`, plus owner-only `split`, share a per-vault cross-process lock acquired before policy/usage reads. A durable pending intent is recorded before signing; uncertain outcomes retain a hold instead of permitting another payment. Successful payments release it only after durable spend accounting. Split records zero transferred amount and its miner fee separately: all outputs return to the vault, and no amount or fee is charged to daily/lifetime spend caps. Kill still blocks split. Inspect without unlocking with `bun src/cli.ts payment-inspect`.
 
-This does **not** cover direct lower-level library helpers, bridge/raw sends, allowance funding or split. Do not run those concurrently with guarded payments or use them to bypass a hold. Owner sweep and kill remain available. There is no automatic hold expiry or clear command. See [payment recovery and scope limitations](docs/payment-recovery.md) before operating unattended.
+This does **not** cover direct lower-level library helpers, bridge/`sendRaw`, allowance funding, fee delegator or merchant replay state. Allowance funding still needs durable certificate/descriptor lifecycle recovery; it is not partially integrated here. Do not run excluded spenders concurrently with guarded payments or use them to bypass a hold. Emergency owner `sweep` and `allowance-sweep` deliberately bypass the guard; **stop all spenders first** because sweeping does not cancel an in-flight payment. Kill remains available. There is no automatic hold expiry or clear command. See [payment recovery and scope limitations](docs/payment-recovery.md) before operating unattended.
 
 ## Merkle Works x402 (payer)
 

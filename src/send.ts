@@ -283,47 +283,62 @@ export async function splitPayment(opts: {
   fetchTxHex?: (txid: string) => Promise<string>;
   broadcast?: (raw: string) => Promise<{ txid: string }>;
 }): Promise<SendResult & { pieces?: number[] }> {
-  const vault = loadVault(opts.root);
-  const pieceSats = opts.pieceSats ?? DEFAULT_SPLIT_PIECE;
-  const decision = evaluateSplit(vault.policy, pieceSats);
-  if (!decision.ok) return decision;
+  try {
+    return await withPaymentGuard(opts.root, "split", async (guard) => {
+      const vault = loadVault(opts.root);
+      const pieceSats = opts.pieceSats ?? DEFAULT_SPLIT_PIECE;
+      const decision = evaluateSplit(vault.policy, pieceSats);
+      if (!decision.ok) return decision;
 
-  const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
-  const total = utxos.reduce((s, u) => s + u.value, 0);
-  const plan = planSplit(total, pieceSats, Math.max(utxos.length, 1));
-  if (!plan.ok) return plan;
+      const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
+      const outpoints = new Set<string>();
+      let total = 0;
+      for (const u of utxos) {
+        const outpoint = `${u.tx_hash}.${u.tx_pos}`;
+        if (!/^[0-9a-f]{64}$/.test(u.tx_hash) || !Number.isSafeInteger(u.tx_pos) || u.tx_pos < 0
+          || !Number.isSafeInteger(u.value) || u.value <= 0 || outpoints.has(outpoint)) {
+          throw new Error("Invalid split source metadata");
+        }
+        outpoints.add(outpoint);
+        total += u.value;
+        if (!Number.isSafeInteger(total)) throw new Error("Invalid split source total");
+      }
+      const plan = planSplit(total, pieceSats, Math.max(utxos.length, 1));
+      if (!plan.ok) return plan;
 
-  const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
-  const tx = new Transaction();
-  for (const u of utxos) {
-    const hex = await fetchTxHex(u.tx_hash);
-    const source = Transaction.fromHex(hex);
-    tx.addInput({
-      sourceTransaction: source,
-      sourceTXID: u.tx_hash,
-      sourceOutputIndex: u.tx_pos,
-      unlockingScriptTemplate: new P2PKH().unlock(vault.key),
+      const fetchTxHex = opts.fetchTxHex ?? defaultFetchTxHex;
+      const tx = new Transaction();
+      for (const u of utxos) {
+        const hex = await fetchTxHex(u.tx_hash);
+        const source = Transaction.fromHex(hex);
+        const output = source.outputs[u.tx_pos];
+        if (source.id("hex") !== u.tx_hash || !output || output.satoshis !== u.value
+          || output.lockingScript.toHex() !== new P2PKH().lock(vault.address).toHex()) {
+          throw new Error("Invalid split source transaction");
+        }
+        tx.addInput({
+          sourceTransaction: source,
+          sourceTXID: u.tx_hash,
+          sourceOutputIndex: u.tx_pos,
+          unlockingScriptTemplate: new P2PKH().unlock(vault.key),
+        });
+      }
+      for (const satoshis of plan.pieces) {
+        tx.addOutput({ satoshis, lockingScript: new P2PKH().lock(vault.address) });
+      }
+      guard.reserve({ asset: "bsv", amount: 0, to: vault.address, fee: plan.fee });
+      await tx.sign();
+      const raw = tx.toHex();
+      const { txid } = await (opts.broadcast ?? defaultBroadcast)(raw);
+      if (txid !== tx.id("hex")) throw new Error("Ambiguous broadcast acknowledgement; payment hold retained.");
+      guard.log({
+        t: new Date().toISOString(), txid, to: vault.address, amount: 0,
+        fee: plan.fee, pieces: plan.pieces.length, note: "split", kind: "split",
+      });
+      return { ok: true, txid, amount: 0, to: vault.address, fee: plan.fee, pieces: plan.pieces };
     });
+  } catch (e) {
+    if (e instanceof PaymentHeldError) return { ok: false, code: e.code, message: e.message };
+    throw e;
   }
-  for (const satoshis of plan.pieces) {
-    tx.addOutput({ satoshis, lockingScript: new P2PKH().lock(vault.address) });
-  }
-  await tx.sign();
-  const raw = tx.toHex();
-  const { txid } = await (opts.broadcast ?? defaultBroadcast)(raw);
-  const paths = vaultPaths(opts.root);
-  appendFileSync(
-    paths.log,
-    `${JSON.stringify({
-      t: new Date().toISOString(),
-      txid,
-      to: vault.address,
-      amount: 0,
-      fee: plan.fee,
-      pieces: plan.pieces.length,
-      note: "split",
-      kind: "split",
-    })}\n`,
-  );
-  return { ok: true, txid, amount: 0, to: vault.address, fee: plan.fee, pieces: plan.pieces };
 }

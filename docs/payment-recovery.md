@@ -4,7 +4,8 @@
 
 `sendPayment` (CLI/MCP send) and shared `payX402` (CLI `x402-pay`, MCP
 `x402_pay`, BSV/Base/Solana), and `delegateX402` (CLI `x402-delegate`, MCP
-`x402_delegate`) share one per-vault exclusive `payment.lock`.
+`x402_delegate`), plus owner-only `splitPayment` (CLI `split`), share one
+per-vault exclusive `payment.lock`.
 It is acquired using exclusive filesystem creation **before** loading policy
 and usage; contenders fail immediately with `PAYMENT_HELD`, without signing
 or network calls. No queue, PID probing, lock timeout or stale-lock removal.
@@ -26,9 +27,30 @@ leaves even a pre-sign lock held. Empty, malformed, orphaned or unreadable
 state fails closed. A crash after log commit can leave a hold alongside an
 already-counted spend; it must **not** be counted again blindly.
 
-Read-only operations and `kill` remain available. Owner sweep remains available
+Read-only operations and `kill` remain available. Owner `sweepPayment` and
+`sweepAllowance` remain available
 for emergency recovery, bypassing the hold as it bypasses policy caps/kill.
-Stop agents before sweeping: this is not cancellation of an in-flight payment.
+Stop **all spenders** before sweeping: this is not cancellation of an in-flight payment.
+
+## Owner split (self-send, not a transfer)
+
+Split acquires the same guard before loading the vault/policy, honors kill,
+and continues to ignore agent caps, allowlist and BRC-181. Each input must
+match its source transaction hash, output index, value and vault P2PKH script;
+duplicate outpoints and unsafe totals are refused before signing. These checks
+do not independently establish that an output remains unspent on chain.
+
+The version-1 intent adds only operation `split`: asset must be `bsv`, amount
+must be **0**, destination is the vault address, and fee is required. There is
+no arbitrary-script destination support. The miner fee is verified input total
+minus the self-output total, not a fabricated transfer amount or cap debit.
+Before signing, this intent is flushed. A matching broadcaster txid and exactly
+one fsynced `kind: "split"`, `amount: 0` row with `paymentId` are required before
+release. Daily/lifetime usage excludes split, including its fee. Ambiguous
+broadcast, mismatched acknowledgement, signing/log failure and process death
+retain the hold just as for agent sends. When reconciling a split, preserve the
+zero transfer amount and record the fee separately; never charge self-outputs
+as an outgoing payment or append a duplicate row after a post-log crash.
 
 ## Legacy delegation boundary
 
@@ -69,11 +91,21 @@ No hold-clear tool is registered.
 
 **Excluded:** direct `settleX402`/`buildClientFundedPartialTx` library calls
 without guarded orchestration, raw `sendRaw` and bridge
-rebalance, allowance funding/sweeping, split, owner sweep, fee delegator and
+rebalance, allowance funding/sweeping, owner sweep, fee delegator and
 merchant replay state. Direct library rail calls without the orchestration
 callbacks are also outside the guard. Do not run excluded spenders concurrently
 with guarded payments or use them to bypass a hold. Allowance semantics are
-unchanged. A follow-up must integrate those independently; this change does
+unchanged. In particular, `fundAllowance` currently signs, issues its certificate,
+broadcasts, then overwrites a single `allowance.json` and appends its spend row.
+It has no durable per-allowance certificate/revocation recovery journal and can
+replace the previous allowance descriptor. Wrapping only the broadcast/log in
+a guard would not provide complete crash recovery for that lifecycle. Funding
+integration is deferred in full: it needs securely persisted descriptor/keyring
+material separate from non-secret intents, preservation of prior allowances,
+and exactly-once accounting/recovery across certificate persistence failures.
+Existing allowance amount caps, intentional empty-allowlist bypass for owner
+script funding, and kill gating are unchanged, not newly guard-protected.
+A follow-up must integrate those independently; this change does
 not claim cross-wallet, distributed, or adversarial-filesystem safety.
 
 ## Inspect without unlocking

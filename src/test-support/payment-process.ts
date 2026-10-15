@@ -2,7 +2,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { Transaction } from "@bsv/sdk";
-import { sendPayment } from "../send";
+import { sendPayment, splitPayment } from "../send";
 import { payX402 } from "../x402-pay";
 
 const [root, mode, behavior = "normal"] = process.argv.slice(2);
@@ -15,7 +15,7 @@ async function pause() {
   if (behavior === "crash") process.exit(23);
   if (behavior === "pause") await Bun.stdin.text();
 }
-const funds = async () => [{ tx_hash: source.id("hex"), tx_pos: 0, value: 2000 }];
+const funds = async () => [{ tx_hash: source.id("hex"), tx_pos: 0, value: source.outputs[0].satoshis! }];
 globalThis.fetch = (async (input, init) => {
   calls++;
   const target = String(input);
@@ -30,7 +30,7 @@ globalThis.fetch = (async (input, init) => {
   throw new Error("Unexpected fixture network");
 }) as typeof fetch;
 try {
-  const result = mode === "x402" ? await payX402(root, "https://fixture.invalid/pay") : await sendPayment({
+  const result = mode === "x402" ? await payX402(root, "https://fixture.invalid/pay") : await (mode === "split" ? splitPayment : sendPayment)({
     root, to: fixture.to, amount: 500,
     fetchUtxos: async () => { calls++; return funds(); },
     fetchTxHex: async () => fixture.hex,
