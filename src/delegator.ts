@@ -38,6 +38,7 @@ export type X402Funding = {
   fetchTxHex?: (txid: string) => Promise<string>;
 };
 
+// Low-level legacy fixture helper (unguarded by default); agents use delegateX402.
 // Builds the client side of an x402 settlement: the vault funds the payment
 // with its own UTXOs (smallest-first), signed SIGHASH_SINGLE|FORKID|
 // ANYONECANPAY (0xC3) so the delegator can append fee inputs AND its own
@@ -52,6 +53,9 @@ export async function buildClientFundedPartialTx(opts: {
   address: string;
   fetchUtxos?: (address: string) => Promise<Utxo[]>;
   fetchTxHex?: (txid: string) => Promise<string>;
+  // Guarded callers commit ALL outputs (not the legacy SINGLE fixture mode).
+  guarded?: boolean;
+  beforeSign?: () => void;
 }): Promise<{ partialTxHex: string; changeSats: number; spentUtxos: Utxo[] }> {
   const ch = opts.challenge;
   const amount = ch.amount_sats;
@@ -73,6 +77,9 @@ export async function buildClientFundedPartialTx(opts: {
     );
   }
 
+  if (opts.guarded && (chosen.length !== 1 || total <= amount)) {
+    throw new Error("REJECTED: guarded delegation supports one funding UTXO with positive change only.");
+  }
   const tx = new Transaction();
   const template = ch.template?.rawtx_hex;
   if (template) {
@@ -96,11 +103,16 @@ export async function buildClientFundedPartialTx(opts: {
 
   for (const u of chosen) {
     const source = Transaction.fromHex(await fetchTxHex(u.tx_hash));
+    if (opts.guarded && (source.id("hex") !== u.tx_hash || !Number.isSafeInteger(u.value)
+      || source.outputs[u.tx_pos]?.satoshis !== u.value
+      || source.outputs[u.tx_pos]?.lockingScript.toHex() !== new P2PKH().lock(opts.address).toHex())) {
+      throw new Error("REJECTED: funding source does not match vault UTXO.");
+    }
     tx.addInput({
       sourceTransaction: source,
       sourceTXID: u.tx_hash,
       sourceOutputIndex: u.tx_pos,
-      unlockingScriptTemplate: new P2PKH().unlock(opts.key, "single", true),
+      unlockingScriptTemplate: new P2PKH().unlock(opts.key, opts.guarded ? "all" : "single", true),
       sequence: 0xffffffff,
     });
   }
@@ -110,6 +122,7 @@ export async function buildClientFundedPartialTx(opts: {
   if (change >= 1) {
     tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(opts.address) });
   }
+  opts.beforeSign?.();
   await tx.sign();
   return { partialTxHex: tx.toHex(), changeSats: Math.max(change, 0), spentUtxos: chosen };
 }
@@ -193,6 +206,10 @@ export async function settleX402(opts: {
   origin?: string;
   fund?: X402Funding;
   onSpend?: (entry: Record<string, unknown>) => void;
+  guarded?: boolean;
+  beforeSign?: () => void;
+  validateCompleted?: (completed: CompletedTransaction, partial: string) => Promise<void>;
+  beforeDelegate?: (partial: string) => Promise<void>;
 }): Promise<SettleX402Result> {
   const decided = decideX402(opts.policy, opts.usage, opts.challenge);
   if (!decided.ok) {
@@ -229,6 +246,8 @@ export async function settleX402(opts: {
         address: opts.fund.address,
         fetchUtxos: opts.fund.fetchUtxos,
         fetchTxHex: opts.fund.fetchTxHex,
+        guarded: opts.guarded,
+        beforeSign: opts.beforeSign,
       });
       partialTxHex = built.partialTxHex;
       changeSats = built.changeSats;
@@ -269,6 +288,7 @@ export async function settleX402(opts: {
     };
   }
 
+  await opts.beforeDelegate?.(partialTxHex);
   let completed: CompletedTransaction;
   try {
     completed = await completeDelegation({
@@ -290,6 +310,7 @@ export async function settleX402(opts: {
     };
   }
 
+  await opts.validateCompleted?.(completed, partialTxHex);
   const method = opts.method || opts.challenge.method || "GET";
   const path = opts.path || opts.challenge.path || "/";
   const query = opts.query ?? opts.challenge.query ?? "";
@@ -308,7 +329,8 @@ export async function settleX402(opts: {
   const doBroadcast = shouldBroadcast(opts.broadcast);
   if (doBroadcast) {
     try {
-      await (opts.broadcastFn ?? defaultBroadcast)(completed.rawtxHex);
+      const receipt = await (opts.broadcastFn ?? defaultBroadcast)(completed.rawtxHex);
+      if (opts.guarded && receipt.txid !== completed.txid) throw new Error("Broadcast transaction ID mismatch");
     } catch (e) {
       return {
         ok: false,

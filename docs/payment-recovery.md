@@ -3,7 +3,8 @@
 ## Scope (not an all-wallet transaction manager)
 
 `sendPayment` (CLI/MCP send) and shared `payX402` (CLI `x402-pay`, MCP
-`x402_pay`, BSV/Base/Solana) share one per-vault exclusive `payment.lock`.
+`x402_pay`, BSV/Base/Solana), and `delegateX402` (CLI `x402-delegate`, MCP
+`x402_delegate`) share one per-vault exclusive `payment.lock`.
 It is acquired using exclusive filesystem creation **before** loading policy
 and usage; contenders fail immediately with `PAYMENT_HELD`, without signing
 or network calls. No queue, PID probing, lock timeout or stale-lock removal.
@@ -29,7 +30,45 @@ Read-only operations and `kill` remain available. Owner sweep remains available
 for emergency recovery, bypassing the hold as it bypasses policy caps/kill.
 Stop agents before sweeping: this is not cancellation of an in-flight payment.
 
-**Excluded:** legacy `x402-delegate`/`settleX402`, raw `sendRaw` and bridge
+## Legacy delegation boundary
+
+CLI/MCP delegation acquires the same guard before vault policy/usage reads.
+Client-funded intent is flushed immediately before signing. Merely returning a
+proof does **not** establish payment: forwarding a signed partial exposes funds
+regardless of local `broadcast=false`. That mode returns `PAYMENT_HELD` without
+a success proof or spend row. The remote party can still broadcast it. Reconcile
+it like any ambiguous authorization; do not retry or infer non-payment.
+
+Guarded funding currently supports one UTXO with positive change. It uses
+ALL|FORKID|ANYONECANPAY (0xC1), binding **all** payee/change outputs, not the
+legacy SINGLE (0xC3) signature which binds only its paired output. Fee sponsors
+may append inputs only. Multi-input/exact-value funding and delegator-added
+outputs are deliberately unsupported at this boundary. A sponsor requiring
+its own change output is incompatible; do not bypass the guard to use it.
+
+Before release, validate exact completed txid/serialization, header nonce,
+payee, preserved client inputs/outputs, source transaction hashes/values/scripts,
+all input scripts/signatures, no duplicate or additional local inputs, exact
+vault debit, and matching successful broadcaster acknowledgement. Append and
+fsync exactly one BSV accounting row with `paymentId`. This is zero-conf
+broadcast evidence, not independent chain confirmation or an unspent-set proof.
+Rejected/ambiguous delegation, invalid completion, mismatched broadcast ID,
+signing/log failure or crash after reservation leaves the hold intact.
+
+Sponsored mode takes the exclusive lock but does not reserve local spending,
+sign, or account a vault debit. Check supplied template sources before forwarding
+so an alleged sponsor cannot send local signed inputs around the intent step.
+Validate completed transactions too. Pure sponsored network failures can release
+normally because no local authorization was produced; process death still
+leaves an orphan lock. Neither mode bypasses an existing hold.
+
+MCP stdio and HTTP use the same registry: `address`, `status`, `balance`, `send`,
+`kill`, `x402_inspect`, `x402_proof`, `x402_delegate`, `x402_pay`. All three
+payment tools use the guard; inspect/proof do not sign or submit transactions.
+No hold-clear tool is registered.
+
+**Excluded:** direct `settleX402`/`buildClientFundedPartialTx` library calls
+without guarded orchestration, raw `sendRaw` and bridge
 rebalance, allowance funding/sweeping, split, owner sweep, fee delegator and
 merchant replay state. Direct library rail calls without the orchestration
 callbacks are also outside the guard. Do not run excluded spenders concurrently

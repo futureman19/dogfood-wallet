@@ -125,9 +125,9 @@ USDC rails have their own blocks (`evm.usdc`, `solana.usdc`) with the same allow
 
 ## Payment concurrency and recovery
 
-CLI/MCP `send` and `x402-pay` share a per-vault cross-process lock. A durable pending intent is recorded before signing; uncertain outcomes retain a hold instead of permitting another payment. Successful payments release it only after durable spend accounting. Inspect without unlocking with `bun src/cli.ts payment-inspect`.
+CLI/MCP `send`, `x402-pay` and `x402-delegate` share a per-vault cross-process lock. A durable pending intent is recorded before signing; uncertain outcomes retain a hold instead of permitting another payment. Successful payments release it only after durable spend accounting. Inspect without unlocking with `bun src/cli.ts payment-inspect`.
 
-This does **not** yet cover legacy `x402-delegate`, bridge/raw sends, allowance funding or split. Do not run those concurrently with guarded payments or use them to bypass a hold. Owner sweep and kill remain available. There is no automatic hold expiry or clear command. See [payment recovery and scope limitations](docs/payment-recovery.md) before operating unattended.
+This does **not** cover direct lower-level library helpers, bridge/raw sends, allowance funding or split. Do not run those concurrently with guarded payments or use them to bypass a hold. Owner sweep and kill remain available. There is no automatic hold expiry or clear command. See [payment recovery and scope limitations](docs/payment-recovery.md) before operating unattended.
 
 ## Merkle Works x402 (payer)
 
@@ -139,7 +139,11 @@ bun src/cli.ts x402-delegate <X402-Challenge>
 
 Uses frozen vectors from `testdata/x402-vectors-v1.json` (canonical JSON, SHA-256, base64url, header binding, body hash, Bitcoin txid).
 
-`x402-delegate` POSTs `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402` (Merkle Works wire format), then builds `X402-Proof`. Unset URL → `NEED_DELEGATOR` (no fetch, no demo host). Policy still gates the payee. Broadcast is **off** unless `--broadcast` or `DOGFOOD_X402_BROADCAST=1`. The merchant nonce UTXO is theirs; Dogfood does not spend local vault coins on it.
+`x402-delegate` POSTs `{partial_tx}` to `$DOGFOOD_X402_DELEGATOR_URL/delegate/x402` (Merkle Works wire format), then builds `X402-Proof`. Unset URL → `NEED_DELEGATOR` (no fetch, no demo host). Policy still gates the payee. Broadcast is **off** unless `--broadcast` or `DOGFOOD_X402_BROADCAST=1`. Default sponsored mode does not sign or spend vault coins and never logs a local spend. `--vault-fund` (MCP `vault_fund: true`) **does spend local coins**. Both modes respect an existing payment hold.
+
+Guarded client funding is deliberately bounded: one funding UTXO with positive change, source hash/value/script verified, and **SIGHASH_ALL|FORKID|ANYONECANPAY (0xC1)** to commit the payee and change. The delegator may append fee inputs, **not outputs/change**. The old SINGLE signature commits only the paired change output, not the payee; validating a later response cannot undo an unsafe signature already sent. Multi-UTXO, exact-value, and output-appending client completions are unsupported here (the low-level legacy fixture helper remains available, not agent-wired). This may reject existing delegators that require their own change output; no compatibility or live-settlement claim is made.
+
+Before signing, intent is durably recorded. Signed bytes sent to a delegator are spending exposure **even when broadcast is off**: that path returns `PAYMENT_HELD`, no proof-as-success and no completed-spend row, and retains the hold for human reconciliation. Opt-in broadcast releases only after validating completed transaction bytes/ID, payee, unchanged client inputs/outputs, source values/scripts, input signatures, no extra local funding, exact vault debit, matching broadcaster ID, and durable accounting. Ambiguity, rejection, signing/log failure, or process death stays held. Sponsored templates are checked for local inputs before forwarding; completed sponsored transactions are validated but never charged to vault usage.
 
 ## BRC-0204 (script + descriptor, not a live allowance)
 
@@ -167,7 +171,7 @@ bun src/cli.ts policy-inspect <envelope-json-or-file>
 
 Verifies a signed `brc-181/agent-policy/1` envelope against frozen vectors (`testdata/brc-181-vectors.json`). Canonical dest is `p2pkh:<hash160>` or `script:<sha256>`; OP_RETURN is not a dest. Human-only inspect. Not MCP.
 
-If the vault contains `brc181.json`, **`send` and `x402-delegate` also verify the envelope and enforce it** (AND with local `policy.json`). Origin is `DOGFOOD_ORIGIN_TOKEN` or the record's `origin_token`. Sweep/split ignore the envelope. A Vector A `max_fee` of 100 sats will reject a typical P2PKH fee — issue a record with a real fee cap. x402-delegate treats merchant fee as 0 (Dogfood does not spend local coins on the nonce UTXO).
+If the vault contains `brc181.json`, **`send` and `x402-delegate` also verify the envelope and enforce it** (AND with local `policy.json`). Origin is `DOGFOOD_ORIGIN_TOKEN` or the record's `origin_token`. Sweep/split ignore the envelope. A Vector A `max_fee` of 100 sats will reject a typical P2PKH fee — issue a record with a real fee cap. x402-delegate charges local fee 0 because its sponsor covers fees; client-funded mode still debits and accounts the challenge amount.
 
 ## Not this
 

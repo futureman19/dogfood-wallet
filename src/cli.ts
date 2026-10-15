@@ -3,10 +3,10 @@ import { defaultFetchUtxos } from "./send";
 import type { BridgeProvider } from "./bridge";
 import { sendPayment, sweepPayment, splitPayment, sendRaw } from "./send";
 import { decideX402, decodeChallengeHeader, buildProof, encodeProofHeader, inspectProof } from "./x402";
-import { settleX402 } from "./delegator";
+import { delegateX402 } from "./x402-delegate";
 import { inspectDescriptor, lockingScriptHex, revocationScriptHex, fundAllowance, sweepAllowance } from "./allowance";
 import { fundRequest } from "./fund-request";
-import { verifyPolicyEnvelope, loadPolicyEnvelope } from "./brc181";
+import { verifyPolicyEnvelope } from "./brc181";
 import { allowDestination, defaultVaultDir, initVault, killVault, loadUsage, loadVault, statusVault, vaultPaths } from "./vault";
 import { readFileSync, existsSync, appendFileSync } from "node:fs";
 
@@ -190,24 +190,17 @@ async function main() {
     }
     case "x402-delegate": {
       if (!a) die("Usage: x402-delegate <X402-Challenge-header> [method] [path] [--broadcast] [--vault-fund]");
-      const vault = loadVault(root);
       const challenge = decodeChallengeHeader(a);
       const extra = [b, ...rest].filter((x): x is string => Boolean(x));
       const wantBroadcast = extra.includes("--broadcast");
       const vaultFund = extra.includes("--vault-fund");
       const positional = extra.filter((x) => x !== "--broadcast" && x !== "--vault-fund");
-      const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
-      if (!loaded.ok) die(loaded.message);
-      const result = await settleX402({
-        policy: vault.policy,
-        usage: loadUsage(root),
+      const result = await delegateX402(root, {
         challenge,
         method: positional[0] || challenge.method,
         path: positional[1] || challenge.path,
         broadcast: wantBroadcast ? true : undefined,
-        envelope: loaded.envelope,
-        fund: vaultFund ? { key: vault.key, address: vault.address } : undefined,
-        onSpend: (entry) => appendFileSync(vaultPaths(root).log, `${JSON.stringify(entry)}\n`),
+        vaultFund,
       });
       console.log(JSON.stringify(result, null, 2));
       if (!result.ok) process.exit(1);
