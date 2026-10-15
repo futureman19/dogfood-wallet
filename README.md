@@ -99,6 +99,8 @@ Claude Desktop / Cursor example:
 
 Hermes: same command, or `bun src/mcp.ts`.
 
+`x402_pay({ url })` uses the same payment orchestration as CLI `x402-pay`: **BSV sats → Base USDC → Solana USDC**, falling through only on `UNSUPPORTED`. Policy, funding, and settlement errors stop immediately. Caps, allowlists, killfile, optional BRC-181 checks for BSV, and per-asset spend logs apply on both surfaces. Base and Solana require human-configured `evm.usdc` / `solana.usdc` policy blocks. Success returns the selected rail's CLI result shape; failures return `isError: true` with `{ ok: false, code, message }`.
+
 HTTP (loopback, stateless POST `/mcp`):
 
 ```bash

@@ -157,25 +157,15 @@ export function createServer(root: string) {
     "x402_pay",
     {
       description:
-        "Pay a Coinbase-flavor x402 paywall (scheme=exact, network=base, USDC) from the vault's EVM pocket. Fetches the URL, reads the 402 accepts list, policy-gates the amount/payee (evm.usdc block + killfile), signs EIP-3009 transferWithAuthorization, and retries with X-PAYMENT. The pocket needs USDC on Base; the facilitator pays gas. Fails DISABLED until a human adds an evm.usdc block to policy.json.",
+        "Pay an x402 URL using the same rails as CLI x402-pay: BSV direct (bsv-direct/bsv-main), then Base USDC, then Solana USDC. Switches only on UNSUPPORTED, never after policy, funding, or settlement errors. Enforces per-asset caps, allowlists, killfile, and optional BRC-181 for BSV; logs successful spends per asset. USDC pockets require human-configured evm.usdc or solana.usdc policy blocks. Returns the selected rail's settlement result.",
       inputSchema: {
         url: z.string().describe("URL of the x402-gated resource"),
       },
     },
     async ({ url }) => {
       try {
-        const vault = loadVault(root);
-        const { deriveEvmAddress } = await import("./evm");
-        const { settleUsdcX402 } = await import("./evm-x402");
-        const result = await settleUsdcX402({
-          url,
-          key: vault.key,
-          from: deriveEvmAddress(vault.key),
-          pocket: vault.policy.evm?.usdc,
-          killfileOn: vault.policy.killfileOn,
-          usage: loadUsage(root, new Date(), "usdc-base"),
-          onSpend: (row) => appendFileSync(vaultPaths(root).log, `${JSON.stringify(row)}\n`),
-        });
+        const { payX402 } = await import("./x402-pay");
+        const result = await payX402(root, url);
         return text(result, false);
       } catch (err) {
         return text({ ok: false, code: (err as { code?: string }).code ?? "ERROR", message: (err as Error).message }, true);
