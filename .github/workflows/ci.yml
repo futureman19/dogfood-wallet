@@ -12,6 +12,7 @@ jobs:
           bun-version: "1.3.9"
       - run: bun install --frozen-lockfile
       - run: bun run verify
+      - run: bun run verify:package
       - run: bun install --frozen-lockfile
         working-directory: site
       - run: bun test

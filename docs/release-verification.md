@@ -95,6 +95,28 @@ acceptance, Docker build, deploy, live provider/chain calls, balances, funding,
 or real payments were performed in this pass. Test settlement is synthetic or
 intercepted, with disposable unfunded vaults and loopback servers.
 
+## Package hygiene follow-up results
+
+Windows / Bun 1.3.9 / npm 12.0.2, local only:
+
+- Red: direct-import regression identified `@noble/curves` and `zod` missing;
+  allowlist regression and real tarball check rejected the prior manifest.
+- Green: frozen root install and `bun run verify`: **542 tests, 42 files,
+  2,084 assertions, zero failures**, including the two new packaging regressions.
+  Strict typechecking now also includes `scripts/**/*.ts`.
+- `bun run verify:package`: **41 files**, **97,575 bytes compressed**,
+  **332,381 bytes unpacked**. Exact JSON inventory passed. Scratch consumer
+  install, installed bin help/doctor, absolute entrypoint local addresses,
+  optional module imports, missing-payee merchant rejection, MCP tool discovery,
+  address/status and `ALLOWLIST` denial passed. Direct dependencies resolved
+  inside the consumer; runtime auto-install was disabled. No private output
+  fields were detected. Native Solana bigint bindings were unavailable with
+  lifecycle scripts disabled; the supported JS fallback was exercised.
+- `git diff --check` passed. Site sources/lock were untouched; no new site build
+  was needed. No global install, publication, operational vault, provider, chain,
+  funding, payment or deployment was used. Disposable vaults and consumers were
+  removed. Hosted Linux CI and global launcher behavior remain unverified.
+
 ## Packaging and remaining release decisions
 
 - Supported install docs say **clone + Bun + frozen install**, not npm global
@@ -103,22 +125,25 @@ intercepted, with disposable unfunded vaults and loopback servers.
   `src/cli.ts` with `#!/usr/bin/env bun`. This is not a Node-only executable.
   Registry ownership/publication status and global-install behavior were not
   verified. Nothing was published.
-- No package `files` allowlist or `.npmignore` exists. The local dry run includes
-  source tests/test-support, site assets, CI and deployment files. Define/review
-  an intentional distribution inventory before publishing; then test an actual
-  packed install on supported platforms without operational keys.
-- There is no `repository` metadata, publishing configuration, or release lifecycle
-  gate in the manifest. Decide those explicitly rather than treating successful
-  source verification as publication approval.
-- `@noble/curves/ed25519` is imported directly by production Solana merchant code
-  but currently supplied transitively. Fresh Bun installation/checking works;
-  review direct runtime dependency declarations before promising portable package
-  installation. This pass did not broaden runtime dependency changes.
-- The manifest still declares Bun `>=1.1.0`; only **1.3.9** was exercised here.
-  Validate the advertised minimum (including text-lockfile support), or revise it
-  deliberately. Docker still uses floating `oven/bun:1`; image reproducibility and
-  container execution were not tested. Node type declarations do not imply Node
-  runtime support.
+- Package hygiene follow-up: an exact `files` allowlist now ships production
+  TypeScript modules and reviewed public docs/license, not tests, fixtures, site,
+  deployment files, development scripts or internal verification records. No
+  runtime bundled data is needed. `bun run verify:package` packs a real tarball,
+  checks its JSON inventory, installs into an unrelated scratch consumer using
+  Bun, and runs offline installed CLI/MCP/optional-import acceptance with
+  auto-install disabled. See [package installation](package-install.md).
+- Production imports were audited with a TypeScript AST regression. Both
+  `@noble/curves@1.9.7` and `zod@4.6.5` are now explicit direct dependencies at
+  already locked versions. No runtime resolution upgrades were needed.
+- The Bun minimum is deliberately raised to **>=1.3.9**, the tested baseline,
+  rather than leaving 1.1.0 unverified. This does not claim Node runtime support.
+  Source frozen installation remains supported. Global install and other OS
+  launchers remain unverified; the isolated package test is now also in CI,
+  whose hosted execution must still be observed after review/push.
+- Registry ownership/publication, repository metadata, publishing configuration,
+  dependency/advisory/license review and release authorization remain decisions.
+  Nothing was published. Docker still uses floating `oven/bun:1`; image
+  reproducibility and container execution were not tested.
 - Security review, dependency/advisory/license review, supported-OS/ACL and
   power-loss durability, backup/recovery drills, actual agent-client UI acceptance,
   and carefully authorized funded acceptance remain separate gates. Existing

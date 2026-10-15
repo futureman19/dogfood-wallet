@@ -12,10 +12,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "verify": "bun run typecheck && bun test",
     "wallet": "bun src/cli.ts",
-    "mcp": "bun src/mcp.ts"
+    "mcp": "bun src/mcp.ts",
+    "verify:package": "bun scripts/verify-package.ts"
   },
   "engines": {
-    "bun": ">=1.1.0"
+    "bun": ">=1.3.9"
   },
   "keywords": [
     "bsv",
@@ -29,11 +30,55 @@
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "^1.99.0",
-    "viem": "^2.57.4"
+    "viem": "^2.57.4",
+    "@noble/curves": "1.9.7",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
     "bun-types": "1.3.9",
     "typescript": "5.9.3"
-  }
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "docs/quickstart.md",
+    "docs/payment-recovery.md",
+    "docs/bridge-lifecycle.md",
+    "docs/bridge-provider-contracts.md",
+    "docs/x402-v1-client-funding-gap.md",
+    "docs/package-install.md",
+    "src/allowance.ts",
+    "src/brc181.ts",
+    "src/bridge-changenow.ts",
+    "src/bridge-contract.ts",
+    "src/bridge-exolix.ts",
+    "src/bridge-funded.ts",
+    "src/bridge.ts",
+    "src/bsv-x402.ts",
+    "src/cli.ts",
+    "src/delegator.ts",
+    "src/doctor.ts",
+    "src/evm-x402.ts",
+    "src/evm.ts",
+    "src/facilitator.ts",
+    "src/fee-delegator.ts",
+    "src/fund-request.ts",
+    "src/http.ts",
+    "src/mcp.ts",
+    "src/merchant-bsv.ts",
+    "src/merchant-main.ts",
+    "src/merchant-solana.ts",
+    "src/merchant.ts",
+    "src/payment-guard.ts",
+    "src/policy.ts",
+    "src/replay-store.ts",
+    "src/send.ts",
+    "src/solana-x402.ts",
+    "src/solana.ts",
+    "src/vault.ts",
+    "src/x402-delegate.ts",
+    "src/x402-pay.ts",
+    "src/x402.ts"
+  ]
 }

@@ -26,7 +26,10 @@ There is no `refund` tool. Sweep/recovery is the owner's job, not the agent's.
 
 **New here? Start with the [BSV-first quickstart](docs/quickstart.md): isolated vault selection, deny-by-default policy, agent connection and offline recovery diagnostics. No funding or payment is needed for the rehearsal.**
 
-Needs [Bun](https://bun.sh).
+Needs [Bun](https://bun.sh) **>=1.3.9** (tested baseline: 1.3.9). This is a
+TypeScript/Bun CLI, not a Node executable. The package/bin name is `dogfood-wallet`;
+no registry publication is claimed. See [local tarball installation and package
+verification](docs/package-install.md) for the supported non-global package path.
 
 ```bash
 git clone https://github.com/futureman19/dogfood-wallet
