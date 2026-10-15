@@ -5,7 +5,8 @@
 `sendPayment` (CLI/MCP send) and shared `payX402` (CLI `x402-pay`, MCP
 `x402_pay`, BSV/Base/Solana), and `delegateX402` (CLI `x402-delegate`, MCP
 `x402_delegate`), plus owner-only `splitPayment` (CLI `split`) and
-`fundAllowance` (CLI `allowance-fund`), share one
+`fundAllowance` (CLI `allowance-fund`), and owner `fundBridge`
+(CLI `bridge-rebalance`), share one
 per-vault exclusive `payment.lock`.
 It is acquired using exclusive filesystem creation **before** loading policy
 and usage; contenders fail immediately with `PAYMENT_HELD`, without signing
@@ -91,12 +92,35 @@ payment tools use the guard; inspect/proof do not sign or submit transactions.
 No hold-clear tool is registered.
 
 **Excluded:** direct `settleX402`/`buildClientFundedPartialTx` library calls
-without guarded orchestration, raw `sendRaw` and bridge
-rebalance, allowance sweeping, owner sweep, fee delegator and
+without guarded orchestration, raw `sendRaw`, allowance sweeping, owner sweep, fee delegator and
 merchant replay state. Direct library rail calls without the orchestration
 callbacks are also outside the guard. Do not run excluded spenders concurrently
 with guarded payments or use them to bypass a hold. This is not cross-wallet,
 distributed, or adversarial-filesystem protection.
+
+## Bridge order-only quarantine
+
+Legacy `bridge.intent.json` / `bridge.order.json` records remain quarantined and
+are never silently migrated or funded. The old order-only library helper remains
+available for inspecting that bounded behavior, but it is not the current CLI
+funding path.
+
+The current owner-only CLI funding/reconciliation lifecycle is described in
+[bridge-lifecycle.md](bridge-lifecycle.md). It uses append-only intent/order/signed
+transaction/accounting evidence and a separate durable parked-exposure witness.
+Funding can relinquish its own execution lock while retaining pending exposure;
+all ordinary guarded spenders remain blocked. Reconciliation acquires its own
+exclusive lock and never takes over a live or abandoned one. It checks the exact
+provider order plus independently confirmed BSV and finalized Base USDC receipt
+logs before accounting/release. The receipt must be strictly newer than the
+pre-order Base boundary, whose chain/number/hash is persisted before creation
+and checked for canonical consistency during reconciliation, including recovery
+after completion-marker persistence. Missing historical boundaries cannot be
+inferred or backfilled safely; leave that exposure held. Provider attribution
+of deposit/order/payout remains trusted, not independently proven by those
+logs (see the lifecycle trust model). Status remains local/read-only. Neither command
+is on MCP. Process-crash locks, corrupt accounting and unresolved evidence remain
+held, with no automatic expiry, retry, broadcast replay or force-unlock.
 
 ## Allowance funding lifecycle
 
@@ -201,8 +225,8 @@ bun src/cli.ts payment-inspect
 
 This command does not decrypt the vault, fetch network data, mutate state or
 clear anything. It reports lock presence, pending schema validity, and only a
-validated payment ID/asset/amount. No clearing/recovery mutation is exposed
-through MCP or CLI. `PAYMENT_HELD` deliberately does not distinguish a live
+validated payment ID/asset/amount. No generic clearing mutation is exposed
+through MCP or CLI. Bridge-only owner reconciliation is described above. `PAYMENT_HELD` deliberately does not distinguish a live
 process from an abandoned lock.
 
 ## Manual forensic procedure — human owner only

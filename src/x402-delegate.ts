@@ -19,6 +19,7 @@ export async function delegateX402(root: string, opts: {
       return settleX402({
         challenge: ch, method: opts.method, path: opts.path, broadcast: opts.broadcast,
         policy: vault.policy, usage: loadUsage(root, new Date(), "bsv"), envelope: loaded.envelope,
+        brc181SpentTotal: loadUsage(root, new Date(), "brc181-bsv").spentLifetime,
         fund: opts.vaultFund ? { key: vault.key, address: vault.address } : undefined,
         guarded: true,
         beforeSign: () => guard.reserve({ asset: "bsv", amount: ch.amount_sats,

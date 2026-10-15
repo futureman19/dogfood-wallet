@@ -319,12 +319,15 @@ export function usageFromLog(lines: string[], now: Date = new Date(), asset = "b
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
-      const row = JSON.parse(trimmed) as { t?: string; amount?: unknown; kind?: unknown; asset?: unknown };
+      const row = JSON.parse(trimmed) as { t?: string; amount?: unknown; fee?: unknown; kind?: unknown; asset?: unknown };
       if (row.kind === "sweep" || row.kind === "split" || row.kind === "allowance-sweep") continue;
       const rowAsset = typeof row.asset === "string" ? row.asset : "bsv";
-      if (rowAsset !== asset) continue;
-      const amount =
+      // Signed BRC-181 total_budget is cumulative payout plus miner fees in sats.
+      // Local ordinary/bridge policy scopes remain separate. Legacy BSV rows count.
+      if (asset === "brc181-bsv" ? !["bsv", "bridge-bsv"].includes(rowAsset) : rowAsset !== asset) continue;
+      let amount =
         typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
+      if (asset === "brc181-bsv" && typeof row.fee === "number" && Number.isSafeInteger(row.fee) && row.fee > 0) amount += row.fee;
       spentLifetime += amount;
       if (typeof row.t === "string" && row.t.slice(0, 10) === today) spentToday += amount;
     } catch {

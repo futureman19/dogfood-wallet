@@ -1,111 +1,38 @@
-import { BridgeError, type BridgeOrderStatus, type BridgeProvider } from "./bridge";
-
-// Exolix v2 provider. No account or API key required (optional partner
-// token raises limits). Amounts on the wire are crypto units; converted at
-// the boundary (1e8 sats, 1e6 USDC base units). Verified live 2026-10-07:
-// BSV -> USDC(BASE) pair active, min ~2.54 BSV, rate ~19.0 USDC/BSV.
-
-const API = "https://exolix.com/api/v2";
-
-const STATUS_MAP: Record<string, BridgeOrderStatus> = {
-  wait: "waiting",
-  confirming: "pending",
-  exchanging: "pending",
-  sending: "pending",
-  success: "finished",
-  overdue: "failed",
-  failed: "failed",
-  refunded: "failed",
-};
-
-export function exolixProvider(opts: {
-  fetchFn?: typeof fetch;
-  apiToken?: string;
-  usdcNetwork?: string;
-  rateType?: "float" | "fixed";
-}): BridgeProvider {
-  const fetchFn = opts.fetchFn ?? fetch;
-  const networkTo = opts.usdcNetwork ?? "BASE";
-  const rateType = opts.rateType ?? "float";
-
-  async function req(path: string, init?: RequestInit): Promise<Record<string, unknown>> {
-    const headers: Record<string, string> = { "content-type": "application/json" };
-    if (opts.apiToken) headers["Authorization"] = `Bearer ${opts.apiToken}`;
-    const res = await fetchFn(`${API}${path}`, { ...init, headers });
-    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!res.ok) {
-      throw new Error(`Exolix ${res.status}: ${typeof body.message === "string" ? body.message : res.statusText}`);
-    }
-    return body;
-  }
-
-  return {
-    name: "exolix",
-
-    async quote({ fromAmountSats }) {
-      const fromAmount = fromAmountSats / 1e8;
-      const body = await req(
-        `/rate?coinFrom=BSV&coinTo=USDC&networkTo=${networkTo}&amount=${fromAmount}&rateType=${rateType}`,
-      );
-      const toAmount = Number(body.toAmount);
-      if (!Number.isFinite(toAmount) || toAmount <= 0) {
-        const minBsv = Number(body.minAmount);
-        const minSats = Number.isFinite(minBsv) ? Math.ceil(minBsv * 1e8) : null;
-        throw new BridgeError(
-          "BELOW_MIN",
-          `REJECTED: below Exolix minimum${minSats ? ` (${minSats} sats ≈ ${minBsv} BSV)` : ""}.`,
-        );
-      }
-      return {
-        provider: "exolix",
-        fromAsset: "bsv",
-        toAsset: "usdc-base",
-        fromAmountSats,
-        toAmount: Math.round(toAmount * 1e6),
-      };
-    },
-
-    async create({ quote, payoutAddress }) {
-      const body = await req(`/exchanges`, {
-        method: "POST",
-        body: JSON.stringify({
-          coinFrom: "BSV",
-          coinTo: "USDC",
-          networkTo,
-          amount: quote.fromAmountSats / 1e8,
-          withdrawalAddress: payoutAddress,
-          rateType,
-        }),
-      });
-      const depositAddress = (body.depositAddress ?? body.deposit_address) as string | undefined;
-      if (!depositAddress) throw new Error("Exolix: create response missing deposit address");
-      const toAmount = Number(body.toAmount ?? body.amountTo ?? quote.toAmount / 1e6);
-      return {
-        provider: "exolix",
-        id: String(body.id),
-        depositAddress,
-        depositAmountSats: quote.fromAmountSats,
-        payoutAddress: (body.withdrawalAddress as string) ?? payoutAddress,
-        payoutAmount: Number.isFinite(toAmount) ? Math.round(toAmount * 1e6) : quote.toAmount,
-        status: "waiting",
-      };
-    },
-
-    async status(id) {
-      const body = await req(`/exchanges/${encodeURIComponent(id)}`);
-      const raw = String(body.status ?? "");
-      const toAmount = Number(body.toAmount ?? body.amountTo);
-      const hash = (body.hashOut ?? body.payoutHash ?? body.hash_out) as string | undefined;
-      return {
-        provider: "exolix",
-        id: String(body.id ?? id),
-        depositAddress: ((body.depositAddress ?? body.deposit_address) as string) ?? "",
-        depositAmountSats: 0,
-        payoutAddress: (body.withdrawalAddress as string) ?? "",
-        payoutAmount: Number.isFinite(toAmount) ? Math.round(toAmount * 1e6) : 0,
-        status: STATUS_MAP[raw] ?? "pending",
-        payoutHash: hash,
-      };
-    },
-  };
+import { bridgeAmount, BridgeError, type BridgeOrderStatus, type BridgeProvider } from './bridge';
+import { BASE_USDC,bad,bindCreate,hash,noMemo,object,orderId,parseEvidence,units,validateOrder } from './bridge-contract';
+// Schema source: docs/bridge-provider-contracts.md. No live compatibility claim.
+const API='https://exolix.com/api/v2';
+const states:Record<string,BridgeOrderStatus>={wait:'waiting',confirmation:'pending',confirmed:'pending',exchanging:'pending',sending:'pending',success:'finished',overdue:'failed',refund:'pending',refunded:'failed'};
+export function exolixProvider(opts:{fetchFn?:typeof fetch;apiToken?:string;usdcNetwork?:string;rateType?:'float'|'fixed'}):BridgeProvider {
+ const network=opts.usdcNetwork??'BASE',rateType=opts.rateType??'float';
+ async function req(path:string,init?:RequestInit) {
+  if(network!=='BASE'||!['float','fixed'].includes(rateType)) bad();
+  const headers:Record<string,string>={'content-type':'application/json',accept:'application/json'};
+  if(opts.apiToken) headers['api-key']=opts.apiToken;
+  const res=await (opts.fetchFn??fetch)(API+path,{...init,headers,redirect:'error'});
+  if(!res.ok) throw new Error(`Exolix request refused (HTTP ${res.status}); response body omitted.`);
+  return object(await res.json());
+ }
+ function parse(body:unknown) { return parseEvidence(body,b=>{
+  const from=object(b.coinFrom),to=object(b.coinTo);
+  if(from.coinCode!=='BSV'||from.network!=='BSV'||from.contract!==null||to.coinCode!=='USDC'||to.network!=='BASE'||typeof to.contract!=='string'||to.contract.toLowerCase()!==BASE_USDC) bad();
+  for(const key of ['deposit_address','toAmount','networkTo','networkFrom','payoutHash','hash_out']) if(key in b) bad();
+  noMemo(b.depositExtraId);noMemo(b.withdrawalExtraId);
+  if(typeof b.status!=='string'||!Object.hasOwn(states,b.status)) bad();
+  return validateOrder({provider:'exolix',id:b.id,depositAddress:b.depositAddress,depositAmountSats:units(b.amount,8),payoutAddress:b.withdrawalAddress,payoutAmount:units(b.amountTo,6),status:states[b.status],depositHash:hash(object(b.hashIn).hash),payoutHash:hash(object(b.hashOut).hash,true)});
+ });}
+ return {name:'exolix',async quote({fromAmountSats}) {
+  if(!Number.isSafeInteger(fromAmountSats)||fromAmountSats<=0) bad();
+  const b=await req(`/rate?coinFrom=BSV&networkFrom=BSV&coinTo=USDC&networkTo=BASE&amount=${fromAmountSats/1e8}&rateType=${rateType}`);
+  for(const [key,value] of Object.entries({coinFrom:'BSV',networkFrom:'BSV',coinTo:'USDC',networkTo:'BASE'}))if(b[key]!==undefined&&b[key]!==value)bad();
+  const amount=bridgeAmount(b.toAmount);
+  if(!Number.isFinite(amount)) {const min=bridgeAmount(b.minAmount);throw new BridgeError('BELOW_MIN',`REJECTED: below Exolix minimum${Number.isFinite(min)?` (${Math.ceil(min*1e8)} sats ≈ ${min} BSV)`:''}.`);}
+  const toAmount=Math.floor(amount*1e6);if(!Number.isSafeInteger(toAmount)||toAmount<=0) bad();
+  return {provider:'exolix',fromAsset:'bsv',toAsset:'usdc-base',fromAmountSats,toAmount};
+ },async create({quote,payoutAddress}) {
+  const body=await req('/transactions',{method:'POST',body:JSON.stringify({coinFrom:'BSV',networkFrom:'BSV',coinTo:'USDC',networkTo:'BASE',amount:quote.fromAmountSats/1e8,withdrawalAddress:payoutAddress,rateType})});
+  return bindCreate(parse(body),quote,payoutAddress);
+ },async status(id) {
+  if(!orderId(id)) bad();const o=parse(await req(`/transactions/${encodeURIComponent(id)}`));if(o.id!==id) bad();return o;
+ }};
 }

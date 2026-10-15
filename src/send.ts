@@ -120,26 +120,28 @@ export async function sendPayment(opts: {
         to: opts.to,
         amount: opts.amount,
         fee: 0,
-        spentTotal: usage.spentLifetime,
+        spentTotal: loadUsage(opts.root, new Date(), "brc181-bsv").spentLifetime,
         origin: opts.origin,
       });
       if (!pre.ok) return pre;
 
       const utxos = await (opts.fetchUtxos ?? defaultFetchUtxos)(vault.address);
-      const { chosen, fee, total } = selectUtxos(utxos, opts.amount);
-      if (chosen.length === 0 || total < opts.amount + fee) {
+      const { chosen, fee: estimatedFee, total } = selectUtxos(utxos, opts.amount);
+      if (chosen.length === 0 || total < opts.amount + estimatedFee) {
         return {
           ok: false,
           code: "INSUFFICIENT",
-          message: `REJECTED: Insufficient funds (${total} sats available, need ${opts.amount + fee}).`,
+          message: `REJECTED: Insufficient funds (${total} sats available, need ${opts.amount + estimatedFee}).`,
         };
       }
+      const change = total - opts.amount - estimatedFee;
+      const fee = estimatedFee + (change > 1 ? 0 : change);
       const post = gateAgentSend({
         envelope: loaded.envelope,
         to: opts.to,
         amount: opts.amount,
         fee,
-        spentTotal: usage.spentLifetime,
+        spentTotal: loadUsage(opts.root, new Date(), "brc181-bsv").spentLifetime,
         origin: opts.origin,
       });
       if (!post.ok) return post;
@@ -157,7 +159,6 @@ export async function sendPayment(opts: {
         });
       }
       tx.addOutput({ satoshis: opts.amount, lockingScript: new P2PKH().lock(opts.to) });
-      const change = total - opts.amount - fee;
       if (change > 1) {
         tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(vault.address) });
       }
@@ -177,7 +178,7 @@ export async function sendPayment(opts: {
 
 // Raw transport: builds, signs and broadcasts a simple P2PKH payment with
 // change back to the vault. NO policy gate and NO spend log — the caller
-// authorizes and logs itself (the bridge does both under its own policy).
+// authorizes and logs itself. Not used by the guarded bridge funding path.
 export async function sendRaw(opts: {
   root: string;
   to: string;

@@ -53,6 +53,7 @@ export async function settleBsvX402(opts: {
   from: string;
   policy: Policy;
   usage: Usage;
+  brc181SpentTotal?: number;
   fetchFn?: typeof fetch;
   beforeSign?: (intent: PaymentIntent) => void;
   onSpend?: (row: Record<string, unknown>) => void;
@@ -72,7 +73,7 @@ export async function settleBsvX402(opts: {
   const decision = evaluateSend(opts.policy, req.satoshis, req.payTo, opts.usage);
   if (!decision.ok) throw new BsvX402Error(decision.code, decision.message);
   const gate = (fee: number) => {
-    const d = gateAgentSend({ envelope: opts.policyEnvelope, to: req.payTo, amount: req.satoshis, fee, spentTotal: opts.usage.spentLifetime, origin: opts.origin });
+    const d = gateAgentSend({ envelope: opts.policyEnvelope, to: req.payTo, amount: req.satoshis, fee, spentTotal: opts.brc181SpentTotal ?? opts.usage.spentLifetime, origin: opts.origin });
     if (!d.ok) throw new BsvX402Error(d.code, d.message);
   };
   gate(0);

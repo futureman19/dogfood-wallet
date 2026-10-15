@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { changenowProvider } from "./bridge-changenow";
+import {fixture} from "./test-support/bridge-schema";
 
 const KEY = "test-api-key";
 
@@ -17,7 +18,7 @@ describe("changenowProvider", () => {
       apiKey: KEY,
       fetchFn: mockFetch((url, init) => {
         seen = { url, key: (init?.headers as Record<string, string>)?.["x-changenow-api-key"] };
-        return { body: { fromAmount: 0.001, toAmount: 0.69 } };
+        return { body: { ...fixture("changenow"), fromAmount: 0.001, toAmount: 0.69 } };
       }),
     });
     const q = await p.quote({ fromAmountSats: 100_000 });
@@ -31,12 +32,12 @@ describe("changenowProvider", () => {
     expect(seen?.url).toContain("toNetwork=base");
   });
 
-  test("quote: provider error surfaces with its message", async () => {
+  test("quote: provider error omits its response body", async () => {
     const p = changenowProvider({
       apiKey: KEY,
       fetchFn: mockFetch(() => ({ status: 400, body: { message: "Amount is too small" } })),
     });
-    await expect(p.quote({ fromAmountSats: 1 })).rejects.toThrow(/too small/i);
+    await expect(p.quote({ fromAmountSats: 1 })).rejects.toThrow(/HTTP 400/);
   });
 
   test("create: POST exchange with payout address; parses id/payin/payout", async () => {
@@ -47,8 +48,9 @@ describe("changenowProvider", () => {
         body = JSON.parse(String(init?.body));
         return {
           body: {
-            id: "cn-123",
-            payinAddress: "1PayinAddressxxxxxxxxxxxxxxxxxxx",
+            ...fixture("changenow"),
+            id: "synthetic00001",
+            payinAddress: "1BoatSLRHtKNngkdXEeobR76b53LETtpyT",
             payoutAddress: body.address,
             fromAmount: 0.001,
             toAmount: 0.69,
@@ -58,16 +60,16 @@ describe("changenowProvider", () => {
     });
     const ord = await p.create({
       quote: { provider: "changenow", fromAsset: "bsv", toAsset: "usdc-base", fromAmountSats: 100_000, toAmount: 690_000 },
-      payoutAddress: "0x3285Bb4b72eCa1d2955928Fb8437Ac7ED167abdd",
+      payoutAddress: "0x1111111111111111111111111111111111111111",
     });
     expect(body?.fromCurrency).toBe("bsv");
     expect(body?.toNetwork).toBe("base");
-    expect(body?.address).toBe("0x3285Bb4b72eCa1d2955928Fb8437Ac7ED167abdd");
+    expect(body?.address).toBe("0x1111111111111111111111111111111111111111");
     expect(ord).toMatchObject({
-      id: "cn-123",
-      depositAddress: "1PayinAddressxxxxxxxxxxxxxxxxxxx",
+      id: "synthetic00001",
+      depositAddress: "1BoatSLRHtKNngkdXEeobR76b53LETtpyT",
       depositAmountSats: 100_000,
-      payoutAddress: "0x3285Bb4b72eCa1d2955928Fb8437Ac7ED167abdd",
+      payoutAddress: "0x1111111111111111111111111111111111111111",
       payoutAmount: 690_000,
       status: "waiting",
     });
@@ -76,18 +78,18 @@ describe("changenowProvider", () => {
   test("status: maps provider states; finished carries payoutHash", async () => {
     const p = changenowProvider({
       apiKey: KEY,
-      fetchFn: mockFetch(() => ({ body: { id: "cn-123", status: "finished", payoutHash: "0xdeadbeef", toAmount: 0.69 } })),
+      fetchFn: mockFetch(() => ({ body: { ...fixture("changenow",true), amountTo: 0.69, toAmount: 0.69 } })),
     });
-    const s = await p.status("cn-123");
+    const s = await p.status("synthetic00001");
     expect(s.status).toBe("finished");
-    expect(s.payoutHash).toBe("0xdeadbeef");
+    expect(s.payoutHash).toBe("0x"+"b".repeat(64));
   });
 
-  test("status: unknown provider status maps to pending", async () => {
+  test("status: documented confirming status maps to pending", async () => {
     const p = changenowProvider({
       apiKey: KEY,
-      fetchFn: mockFetch(() => ({ body: { id: "x", status: "confirming" } })),
+      fetchFn: mockFetch(() => ({ body: { ...fixture("changenow",true), status: "confirming" } })),
     });
-    expect((await p.status("x")).status).toBe("pending");
+    expect((await p.status("synthetic00001")).status).toBe("pending");
   });
 });

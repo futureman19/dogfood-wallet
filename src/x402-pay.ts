@@ -26,6 +26,7 @@ export async function payX402(root: string, url: string) {
         from: vault.address,
         policy: vault.policy,
         usage: loadUsage(root, new Date(), "bsv"),
+        brc181SpentTotal: loadUsage(root, new Date(), "brc181-bsv").spentLifetime,
         ownSpendTxids: ownSpendTxids.slice(-10),
         // Load the signed BSV policy only if a BSV requirement is offered.
         get policyEnvelope() {

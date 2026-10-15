@@ -194,6 +194,7 @@ export function shouldBroadcast(flag?: boolean, env = process.env.DOGFOOD_X402_B
 export async function settleX402(opts: {
   policy: Policy;
   usage: Usage;
+  brc181SpentTotal?: number;
   challenge: X402Challenge;
   delegatorUrl?: string;
   fetchFn?: typeof fetch;
@@ -220,7 +221,7 @@ export async function settleX402(opts: {
     lockingScriptHex: opts.challenge.payee_locking_script_hex,
     amount: opts.challenge.amount_sats,
     fee: 0,
-    spentTotal: opts.usage.spentLifetime,
+    spentTotal: opts.brc181SpentTotal ?? opts.usage.spentLifetime,
     origin: opts.origin,
   });
   if (!brc.ok) return { ok: false, broadcast: false, code: brc.code, message: brc.message };

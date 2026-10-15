@@ -130,7 +130,32 @@ USDC rails have their own blocks (`evm.usdc`, `solana.usdc`) with the same allow
 
 CLI/MCP `send`, `x402-pay` and `x402-delegate`, plus owner-only `split` and `allowance-fund`, share a per-vault cross-process lock acquired before policy/usage reads. A durable pending intent is recorded before signing; uncertain outcomes retain a hold instead of permitting another payment. Successful payments release it only after durable spend accounting. Split records zero transferred amount and its miner fee separately: all outputs return to the vault, and no amount or fee is charged to daily/lifetime spend caps. Kill still blocks split. Inspect without unlocking with `bun src/cli.ts payment-inspect`.
 
-This does **not** cover direct lower-level library helpers, bridge/`sendRaw`, fee delegator or merchant replay state. Allowance funding preserves private per-funding recovery records before broadcast and releases only after durable accounting and a completion marker. Do not run excluded spenders concurrently with guarded payments or use them to bypass a hold. Emergency owner `sweep` and `allowance-sweep` deliberately bypass the guard; **stop all spenders first** because sweeping does not cancel an in-flight payment. Kill remains available. There is no automatic hold expiry or clear command. See [payment recovery and scope limitations](docs/payment-recovery.md) before operating unattended.
+Owner `bridge-rebalance` shares the lock for guarded funding; explicit owner `bridge-reconcile` verifies settlement before releasing exposure (see below). This does **not** cover direct lower-level library helpers, `sendRaw`, fee delegator or merchant replay state. Allowance funding preserves private per-funding recovery records before broadcast and releases only after durable accounting and a completion marker. Do not run excluded spenders concurrently with guarded payments or use them to bypass a hold. Emergency owner `sweep` and `allowance-sweep` deliberately bypass the guard; **stop all spenders first** because sweeping does not cancel an in-flight payment. Kill remains available. There is no automatic hold expiry or clear command. See [payment recovery and scope limitations](docs/payment-recovery.md) before operating unattended.
+
+## Bridge: guarded funding and owner reconciliation
+
+`bridge-rebalance [sats]` creates one order and deposits once under the shared
+payment guard. Without an amount, the configured low-water threshold applies.
+It returns `awaiting-reconciliation`, **not** completed-swap success. Ambiguity
+retains a durable exposure hold; never retry the deposit automatically.
+
+`bridge-status [orderId|intentId]` is local and read-only. Explicit owner
+`bridge-reconcile <intentId>` validates the exact provider order, independently
+confirmed BSV deposit and native Base USDC receipt/log evidence, writes actual
+arrival accounting exactly once, and releases only its own exclusive transition.
+The Base receipt must be newer than a canonical block boundary pinned durably
+before order creation. This prevents historical receipt replay, **not** dishonest
+provider attribution of a contemporaneous transfer: the provider still asserts
+the deposit/order/payout relationship. Signed BRC-181 budgets combine ordinary
+and bridge BSV debits (principal plus fees); local policy caps stay separate.
+It never steals a live or abandoned execution lock. Emergency sweeps remain
+available and do not erase holds/history. All bridge commands remain off MCP.
+
+See [bridge lifecycle and limitations](docs/bridge-lifecycle.md) and
+[official provider contracts / synthetic fixture provenance](docs/bridge-provider-contracts.md).
+This branch has offline synthetic coverage, **not live funded acceptance or
+provider compatibility proof**. Legacy order-only quarantine records remain
+held and are not silently migrated into funded evidence.
 
 ## Merkle Works x402 (payer)
 
