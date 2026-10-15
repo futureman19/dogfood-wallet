@@ -50,7 +50,7 @@ function fakeChain(over?: {
       if (over?.sigValid === false) return false;
       const recovered = await recoverTypedDataAddress({
         domain: args.domain as never,
-        types: args.types as never,
+        types: args.types as ReturnType<typeof evmTransferAuthorizationTypes>,
         primaryType: "TransferWithAuthorization",
         message: args.message as never,
         signature: args.signature as `0x${string}`,

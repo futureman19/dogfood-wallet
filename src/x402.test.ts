@@ -51,6 +51,11 @@ const vectors = JSON.parse(
   }>;
 };
 
+function required<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("Missing required fixture field");
+  return value;
+}
+
 function byName(name: string) {
   const v = vectors.vectors.find((x) => x.name === name);
   if (!v) throw new Error(name);
@@ -60,22 +65,22 @@ function byName(name: string) {
 describe("x402 codec vs merkleworks vectors", () => {
   test("canonical JSON and hash match valid_get_empty", () => {
     const v = byName("valid_get_empty");
-    expect(canonicalJson(v.challenge)).toBe(v.canonical_challenge_json);
-    expect(challengeSha256(v.challenge!)).toBe(v.challenge_sha256);
-    expect(toBase64Url(v.canonical_challenge_json!)).toBe(v.challenge_base64url);
+    expect(canonicalJson(v.challenge)).toBe(required(v.canonical_challenge_json));
+    expect(challengeSha256(v.challenge!)).toBe(required(v.challenge_sha256));
+    expect(toBase64Url(required(v.canonical_challenge_json))).toBe(required(v.challenge_base64url));
   });
 
   test("decodeChallengeHeader round-trips valid_get_empty", () => {
     const v = byName("valid_get_empty");
-    const decoded = decodeChallengeHeader(v.challenge_base64url!);
+    const decoded = decodeChallengeHeader(required(v.challenge_base64url));
     expect(decoded.amount_sats).toBe(100);
     expect(decoded.scheme).toBe("bsv-tx-v1");
-    expect(challengeSha256(decoded)).toBe(v.challenge_sha256);
+    expect(challengeSha256(decoded)).toBe(required(v.challenge_sha256));
   });
 
   test("inspectChallenge rejects expired_challenge", () => {
     const v = byName("expired_challenge");
-    const d = inspectChallenge(v.challenge!, new Date("2026-10-07T00:00:00.000Z"));
+    const d = inspectChallenge(v.challenge as import("./x402").X402Challenge, new Date("2026-10-07T00:00:00.000Z"));
     expect(d.ok).toBe(false);
     if (d.ok) return;
     expect(d.code).toBe("EXPIRED");
@@ -83,30 +88,30 @@ describe("x402 codec vs merkleworks vectors", () => {
 
   test("canonical JSON and hash match valid_post_with_body", () => {
     const v = byName("valid_post_with_body");
-    expect(canonicalJson(v.challenge)).toBe(v.canonical_challenge_json);
-    expect(challengeSha256(v.challenge!)).toBe(v.challenge_sha256);
-    expect(toBase64Url(v.canonical_challenge_json!)).toBe(v.challenge_base64url);
+    expect(canonicalJson(v.challenge)).toBe(required(v.canonical_challenge_json));
+    expect(challengeSha256(v.challenge!)).toBe(required(v.challenge_sha256));
+    expect(toBase64Url(required(v.canonical_challenge_json))).toBe(required(v.challenge_base64url));
   });
 
   test("header binding hash matches frozen vector", () => {
     const v = byName("header_binding_canonical");
-    expect(headerBindingSha256(v.header_binding_string!)).toBe(v.headers_sha256);
+    expect(headerBindingSha256(v.header_binding_string!)).toBe(required(v.headers_sha256));
   });
 
   test("body hash matches frozen vector", () => {
     const v = byName("body_hash_examples");
-    expect(bodySha256FromHex(v.body_bytes!)).toBe(v.body_sha256);
+    expect(bodySha256FromHex(v.body_bytes!)).toBe(required(v.body_sha256));
     expect(bodySha256FromHex("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
   });
 
   test("txid is double-SHA256 byte-reversed", () => {
     const v = byName("txid_derivation");
-    expect(txidFromRawHex(v.rawtx_hex!)).toBe(v.txid);
+    expect(txidFromRawHex(required(v.rawtx_hex))).toBe(required(v.txid));
   });
 
   test("invalid_txid_mismatch is detected", () => {
     const v = byName("invalid_txid_mismatch");
-    expect(txidFromRawHex(v.rawtx_hex!)).not.toBe(v.txid);
+    expect(txidFromRawHex(required(v.rawtx_hex))).not.toBe(required(v.txid));
   });
 });
 
@@ -150,8 +155,8 @@ describe("x402 proof + header binding", () => {
       "Content-Type": "text/plain",
       "X402-Client": "test-client/1.0",
     });
-    expect(s).toBe(v.header_binding_string);
-    expect(headerBindingSha256(s)).toBe(v.headers_sha256);
+    expect(s).toBe(required(v.header_binding_string));
+    expect(headerBindingSha256(s)).toBe(required(v.headers_sha256));
   });
 
   test("inspectProof rejects invalid_proof_version", () => {
@@ -169,10 +174,10 @@ describe("x402 proof + header binding", () => {
         v: 1,
         scheme: "bsv-tx-v1",
         challenge_sha256: "aa".repeat(32),
-        payment: { txid: v.txid!, rawtx_b64: Buffer.from(v.rawtx_hex!, "hex").toString("base64") },
+        payment: { txid: required(v.txid), rawtx_b64: Buffer.from(required(v.rawtx_hex), "hex").toString("base64") },
         request: { method: "GET", path: "/", query: "", req_headers_sha256: "", req_body_sha256: "" },
       },
-      { rawtxHex: v.rawtx_hex },
+      { rawtxHex: required(v.rawtx_hex) },
     );
     expect(d.ok).toBe(false);
     if (d.ok) return;
@@ -204,12 +209,12 @@ describe("x402 proof + header binding", () => {
     const ch = byName("valid_get_empty");
     const proof = buildProof({
       challenge: ch.challenge as never,
-      rawtxHex: raw.rawtx_hex!,
+      rawtxHex: required(raw.rawtx_hex),
       method: "GET",
       path: "/v1/resource",
     });
     expect(proof.v).toBe(1);
-    expect(proof.payment.txid).toBe(raw.txid);
+    expect(proof.payment.txid).toBe(required(raw.txid));
     expect(inspectProof(proof).ok).toBe(true);
   });
 });

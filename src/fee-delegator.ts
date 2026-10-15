@@ -201,5 +201,6 @@ export async function runFeeDelegatorServer(opts: {
       return Response.json({ error: "NOT_FOUND" }, { status: 404 });
     },
   });
-  return { port: server.port, address: vault.address, stop: () => server.stop(true) };
+  // This server always binds TCP (never a Unix socket), so Bun supplies a port.
+  return { port: server.port!, address: vault.address, stop: () => server.stop(true) };
 }

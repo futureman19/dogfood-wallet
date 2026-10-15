@@ -1,3 +1,4 @@
+import { mockFetch } from "./fetch";
 // Routing-only subprocess fixtures: mocked keys/rails, real disposable lock files.
 // Full payment/hold integration is covered by mcp-x402 and payment-safety tests.
 import { mock } from "bun:test";
@@ -34,4 +35,4 @@ mock.module("../evm-x402", () => ({ UsdcX402Error, settleUsdcX402: async () => {
 mock.module("../solana-x402", () => ({ settleSolanaX402: async () => {
   console.log("RAIL:solana"); return { ok: true, rail: "solana" };
 } }));
-globalThis.fetch = (async () => { throw new Error("Unexpected live network"); }) as typeof fetch;
+globalThis.fetch = mockFetch((async () => { throw new Error("Unexpected live network"); }));

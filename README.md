@@ -222,7 +222,20 @@ If the vault contains `brc181.json`, **`send` and `x402-delegate` also verify th
 ## Dev
 
 ```bash
-bun test
+bun install --frozen-lockfile
+bun run verify  # strict root TypeScript check, then full Bun tests
 ```
+
+`bun run typecheck` checks all `src/**/*.ts`, including tests and subprocess
+fixtures. The independent JavaScript site uses its own lockfile:
+
+```bash
+cd site
+bun install --frozen-lockfile
+bun test
+bun run build
+```
+
+See [local release verification and remaining gates](docs/release-verification.md).
 
 MIT. Keys never belong in git, logs, or MCP responses.

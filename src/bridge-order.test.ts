@@ -1,3 +1,4 @@
+import { mockFetch } from "./test-support/fetch";
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,7 +37,7 @@ test("creates durable intent before POST and order before returning a persistent
   expect(saved).not.toContain("DO_NOT_PERSIST");
   expect(readdirSync(r)).not.toContain("spends.jsonl");
   await expect(run({ root: r, prepare: async () => { throw new Error("must not read"); } })).rejects.toMatchObject({ code: "PAYMENT_HELD" });
-  expect((await sendPayment({ root: r, to: payin, amount: 1 })).code).toBe("PAYMENT_HELD");
+  expect(await sendPayment({ root: r, to: payin, amount: 1 })).toMatchObject({ ok: false, code: "PAYMENT_HELD" });
 });
 
 test("existing send guard excludes bridge before reads and network", async () => {
@@ -113,11 +114,11 @@ test("CLI bridge has no raw send or arrival writer and stays off MCP", () => {
 
 for (const [name, make] of [["changenow", async (fetchFn: typeof fetch) => (await import("./bridge-changenow")).changenowProvider({ apiKey: "fixture-only", fetchFn })], ["exolix", async (fetchFn: typeof fetch) => (await import("./bridge-exolix")).exolixProvider({ fetchFn })]] as const) {
   test(`${name} missing create evidence is not replaced by request/quote values`, async () => {
-    const provider = await make((async () => new Response(JSON.stringify({ id: "known-order", payinAddress: payin, depositAddress: payin }))) as typeof fetch);
+    const provider = await make(mockFetch((async () => new Response(JSON.stringify({ id: "known-order", payinAddress: payin, depositAddress: payin })))));
     await expect(provider.create({ quote: { ...quote, provider: name } as any, payoutAddress: pocket })).rejects.toMatchObject({candidateOrderId: "known-order"});
   });
   test(`${name} provider errors omit response bodies`, async () => {
-    const provider = await make((async () => new Response(JSON.stringify({ message: "PRIVATE_RESPONSE" }), { status: 400 })) as typeof fetch);
+    const provider = await make(mockFetch((async () => new Response(JSON.stringify({ message: "PRIVATE_RESPONSE" }), { status: 400 }))));
     try { await provider.create({ quote: { ...quote, provider: name } as any, payoutAddress: pocket }); throw new Error("expected rejection"); }
     catch (e: any) { expect(e.message).not.toContain("PRIVATE_RESPONSE"); }
   });
@@ -181,7 +182,7 @@ for (const depositAddress of ["1BoatSLRHtKNngkdXEeobR76b53LETtpyU", "3J98t1WpEZ7
 });
 
 for (const name of ["changenow", "exolix"]) test(`${name} preserves order ID when create lacks payin evidence`, async () => {
-  const fetchFn = (async () => new Response(JSON.stringify({ id: "candidate-order" }))) as typeof fetch;
+  const fetchFn = mockFetch((async () => new Response(JSON.stringify({ id: "candidate-order" }))));
   const provider = name === "changenow" ? (await import("./bridge-changenow")).changenowProvider({ apiKey: "fixture-only", fetchFn }) : (await import("./bridge-exolix")).exolixProvider({ fetchFn });
   const r = root();
   provider.quote = async () => ({ ...quote, provider: name }) as any;
@@ -231,14 +232,14 @@ test("real CLI holds after unavailable funding source; offline status never decr
 });
 
 for (const name of ["changenow", "exolix"]) test(`${name} does not coerce boolean IDs or amounts into valid evidence`, async () => {
-  const fetchFn = (async () => Response.json({ id: true, payinAddress: payin, depositAddress: payin,
-    payoutAddress: pocket, withdrawalAddress: pocket, fromAmount: 0.001000001, amount: 0.001000001, toAmount: true })) as typeof fetch;
+  const fetchFn = mockFetch((async () => Response.json({ id: true, payinAddress: payin, depositAddress: payin,
+    payoutAddress: pocket, withdrawalAddress: pocket, fromAmount: 0.001000001, amount: 0.001000001, toAmount: true })));
   const provider = name === "changenow" ? (await import("./bridge-changenow")).changenowProvider({ apiKey: "fixture-only", fetchFn }) : (await import("./bridge-exolix")).exolixProvider({ fetchFn });
   await expect(provider.create({ quote: { ...quote, provider: name } as any, payoutAddress: pocket })).rejects.toThrow();
 });
 
 for (const name of ["changenow", "exolix"]) test(`${name} refuses boolean quote amounts`, async () => {
-  const fetchFn = (async () => Response.json({ toAmount: true })) as typeof fetch;
+  const fetchFn = mockFetch((async () => Response.json({ toAmount: true })));
   const provider = name === "changenow" ? (await import("./bridge-changenow")).changenowProvider({ apiKey: "fixture-only", fetchFn }) : (await import("./bridge-exolix")).exolixProvider({ fetchFn });
   await expect(provider.quote({ fromAmountSats: 100_000 })).rejects.toThrow();
 });

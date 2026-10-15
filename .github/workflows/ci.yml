@@ -8,5 +8,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - run: bun install
+        with:
+          bun-version: "1.3.9"
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
+      - run: bun install --frozen-lockfile
+        working-directory: site
       - run: bun test
+        working-directory: site
+      - run: bun run build
+        working-directory: site

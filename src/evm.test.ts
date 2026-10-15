@@ -34,7 +34,7 @@ describe("signTransferWithAuthorization", () => {
       value: "10000",
       validAfter: "0",
       validBefore: "1799999999",
-      nonce: "0x" + "ab".repeat(32),
+      nonce: `0x${"ab".repeat(32)}`,
     };
     const signature = await signTransferWithAuthorization({
       key: KEY_ONE,
@@ -52,7 +52,7 @@ describe("signTransferWithAuthorization", () => {
         value: 10000n,
         validAfter: 0n,
         validBefore: 1799999999n,
-        nonce: "0x" + "ab".repeat(32),
+        nonce: `0x${"ab".repeat(32)}`,
       },
       signature: signature as `0x${string}`,
     });

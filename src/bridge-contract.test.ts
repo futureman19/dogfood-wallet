@@ -1,10 +1,11 @@
+import { mockFetch } from "./test-support/fetch";
 import { expect, test } from 'bun:test';
 import { exolixProvider } from './bridge-exolix';
 import { changenowProvider } from './bridge-changenow';
 import { fixture } from './test-support/bridge-schema';
 const pocket = '0x1111111111111111111111111111111111111111';
 for(const name of ['exolix','changenow']) {
- const make=(body:any, extra:any={})=> {const fetchFn=(async()=>Response.json(body)) as typeof fetch;return name==='exolix'?exolixProvider({fetchFn,...extra}):changenowProvider({apiKey: 'fixture-only', fetchFn,...extra});};
+ const make=(body:any, extra:any={})=> {const fetchFn=mockFetch((async()=>Response.json(body)));return name==='exolix'?exolixProvider({fetchFn,...extra}):changenowProvider({apiKey: 'fixture-only', fetchFn,...extra});};
  const q={provider:name,fromAsset:'bsv' as const,toAsset:'usdc-base' as const,fromAmountSats:100000,toAmount:1000000};
  test(`${name} schema-derived create/status bind exact evidence`,async()=>{
   const created=await make(fixture(name)).create({quote:q,payoutAddress:pocket});
@@ -38,22 +39,22 @@ for(const name of ['exolix','changenow']) {
 }
 test('ChangeNOW conflicting status amount aliases reject',async()=>{
  const b=fixture('changenow',true);b.toAmount=2;
- const p=changenowProvider({apiKey: 'fixture-only',fetchFn:(async()=>Response.json(b)) as typeof fetch});
+ const p=changenowProvider({apiKey: 'fixture-only',fetchFn:mockFetch((async()=>Response.json(b)))});
  await expect(p.status(b.id)).rejects.toThrow();
 });
 test('Exolix quote cannot contradict the requested route',async()=>{
- const p=exolixProvider({fetchFn:(async()=>Response.json({toAmount:1,networkTo:'ETH'})) as typeof fetch});
+ const p=exolixProvider({fetchFn:mockFetch((async()=>Response.json({toAmount:1,networkTo:'ETH'})))});
  await expect(p.quote({fromAmountSats:100000})).rejects.toThrow();
 });
 test('Exolix uses documented transactions endpoint, networkFrom, api-key header',async()=>{
  let path='',data:any,headers:any;
- const p=exolixProvider({apiToken:'synthetic',fetchFn:(async(u,i)=>{path=String(u);data=JSON.parse(String(i?.body));headers=i?.headers;return Response.json(fixture('exolix'));}) as typeof fetch});
+ const p=exolixProvider({apiToken:'synthetic',fetchFn:mockFetch((async(u,i)=>{path=String(u);data=JSON.parse(String(i?.body));headers=i?.headers;return Response.json(fixture('exolix'));}))});
  await p.create({quote:{provider:'exolix',fromAsset:'bsv',toAsset:'usdc-base',fromAmountSats:100000,toAmount:1000000},payoutAddress:pocket});
  expect(path).toBe('https://exolix.com/api/v2/transactions');expect(data.networkFrom).toBe('BSV');expect(headers['api-key']).toBe('synthetic');expect(headers.Authorization).toBeUndefined();
 });
 
 test('create with an existing deposit hash cannot authorize another deposit',async()=>{
  const b=fixture('exolix');b.hashIn.hash='a'.repeat(64);
- const p=exolixProvider({fetchFn:(async()=>Response.json(b)) as typeof fetch});
+ const p=exolixProvider({fetchFn:mockFetch((async()=>Response.json(b)))});
  await expect(p.create({quote:{provider:'exolix',fromAsset:'bsv',toAsset:'usdc-base',fromAmountSats:100000,toAmount:1000000},payoutAddress:pocket})).rejects.toThrow();
 });

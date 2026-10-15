@@ -89,11 +89,12 @@ export async function settleUsdcX402(opts: {
   const header = await buildX402PaymentHeader({ key: opts.key, requirement: req, from: opts.from, now: opts.now });
   const paid = await fetchFn(opts.url, { headers: { "X-PAYMENT": header } });
 
-  let settle: { success?: boolean; transaction?: string; error?: string } | null = null;
+  type SettlementReceipt = { success?: boolean; transaction?: string; error?: string };
+  let settle: SettlementReceipt | null = null;
   const settleHeader = paid.headers.get("X-PAYMENT-RESPONSE");
   if (settleHeader) {
     try {
-      settle = JSON.parse(Buffer.from(settleHeader, "base64").toString("utf8")) as typeof settle;
+      settle = JSON.parse(Buffer.from(settleHeader, "base64").toString("utf8")) as SettlementReceipt | null;
     } catch {
       settle = null;
     }

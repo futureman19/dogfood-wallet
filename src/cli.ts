@@ -399,8 +399,8 @@ async function main() {
           ? await (async () => {
               const { makeBaseFacilitatorChain, selfSettle } = await import("./facilitator");
               const { chain, account } = makeBaseFacilitatorChain(loadVault(root).key);
-              return async (payment: unknown, requirement: never) =>
-                selfSettle({ chain, account, payment: payment as never, requirement, ownPayTo: payTo });
+              return async (payment: unknown, requirement: import("./merchant").PaymentRequirement) =>
+                selfSettle({ chain, account, payment: payment as Parameters<typeof selfSettle>[0]["payment"], requirement, ownPayTo: payTo });
             })()
           : undefined,
         ...(selfFacilitate

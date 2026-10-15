@@ -1,3 +1,4 @@
+import { mockFetch } from "./test-support/fetch";
 import { describe, expect, test } from "bun:test";
 import { PrivateKey } from "@bsv/sdk";
 import { settleUsdcX402, UsdcX402Error } from "./evm-x402";
@@ -46,14 +47,14 @@ function jsonResponse(status: number, body: unknown, headers: Record<string, str
 describe("settleUsdcX402", () => {
   test("happy path: 402 -> sign -> paid 200 with settlement header; spend logged", async () => {
     const calls: { url: string; payment?: string | null }[] = [];
-    const fetchFn: typeof fetch = async (input, init) => {
+    const fetchFn = mockFetch(async (input, init) => {
       const url = String(input);
       const payment = (init?.headers as Record<string, string> | undefined)?.["X-PAYMENT"] ?? null;
       calls.push({ url, payment });
       if (!payment) return jsonResponse(402, acceptsBody());
       const settle = { success: true, transaction: "0x" + "11".repeat(32), network: "base", payer: FROM };
       return jsonResponse(200, { data: "premium" }, { "X-PAYMENT-RESPONSE": Buffer.from(JSON.stringify(settle)).toString("base64") });
-    };
+    });
     const spends: Record<string, unknown>[] = [];
     const r = await settleUsdcX402({
       url: "https://api.example.com/premium",
@@ -81,10 +82,10 @@ describe("settleUsdcX402", () => {
 
   test("policy refusal stops before signing: only one fetch, no spend logged", async () => {
     const calls: string[] = [];
-    const fetchFn: typeof fetch = async (input) => {
+    const fetchFn = mockFetch(async (input) => {
       calls.push(String(input));
       return jsonResponse(402, acceptsBody({ maxAmountRequired: "2000000" }));
-    };
+    });
     const spends: unknown[] = [];
     await expect(
       settleUsdcX402({
@@ -103,7 +104,7 @@ describe("settleUsdcX402", () => {
   });
 
   test("no acceptable requirement (wrong scheme/network/asset) fails closed", async () => {
-    const fetchFn: typeof fetch = async () => jsonResponse(402, acceptsBody({ network: "ethereum" }));
+    const fetchFn = mockFetch(async () => jsonResponse(402, acceptsBody({ network: "ethereum" })));
     await expect(
       settleUsdcX402({
         url: "https://api.example.com/premium",
@@ -118,7 +119,7 @@ describe("settleUsdcX402", () => {
   });
 
   test("non-402 first response refuses to pay", async () => {
-    const fetchFn: typeof fetch = async () => jsonResponse(200, { data: "free" });
+    const fetchFn = mockFetch(async () => jsonResponse(200, { data: "free" }));
     await expect(
       settleUsdcX402({
         url: "https://api.example.com/premium",
@@ -133,12 +134,12 @@ describe("settleUsdcX402", () => {
   });
 
   test("failed settlement reports the facilitator error and logs nothing", async () => {
-    const fetchFn: typeof fetch = async (_input, init) => {
+    const fetchFn = mockFetch(async (_input, init) => {
       const payment = (init?.headers as Record<string, string> | undefined)?.["X-PAYMENT"];
       if (!payment) return jsonResponse(402, acceptsBody());
       const settle = { success: false, error: "insufficient_balance", network: "base", payer: FROM };
       return jsonResponse(402, acceptsBody(), { "X-PAYMENT-RESPONSE": Buffer.from(JSON.stringify(settle)).toString("base64") });
-    };
+    });
     const spends: unknown[] = [];
     await expect(
       settleUsdcX402({

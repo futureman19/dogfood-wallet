@@ -54,7 +54,7 @@ describe("BRC-0204 Type42 keys", () => {
     expect(keys.agentPubHex).not.toBe(agent.toPublicKey().toString().toLowerCase());
     expect(keys.ownerPriv.toPublicKey().toString().toLowerCase()).toBe(keys.ownerPubHex);
     const agentView = new KeyDeriver(agent).derivePublicKey(
-      AGENT_ALLOWANCE_PROTOCOL_ID,
+      [...AGENT_ALLOWANCE_PROTOCOL_ID],
       id,
       owner.toPublicKey().toString(),
       true,
@@ -401,8 +401,8 @@ describe("sweepAllowance", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       const sweep = Transaction.fromHex(sweepRaw);
-      expect(sweep.inputs[0].unlockingScript.toASM().endsWith("OP_0")).toBe(true);
-      expect(sweep.inputs[1].unlockingScript.toASM().endsWith("OP_0")).toBe(false);
+      expect(sweep.inputs[0].unlockingScript?.toASM().endsWith("OP_0")).toBe(true);
+      expect(sweep.inputs[1].unlockingScript?.toASM().endsWith("OP_0")).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

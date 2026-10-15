@@ -92,12 +92,12 @@ export async function settleSolanaX402(opts: {
   const header = await buildSolanaX402PaymentHeader({ key: opts.key, requirement: req, fetchFn });
   const paid = await fetchFn(opts.url, { headers: { "X-PAYMENT": header } });
 
-  let settle: { success?: boolean; transaction?: string; txHash?: string; error?: string; errorReason?: string } | null =
-    null;
+  type SettlementReceipt = { success?: boolean; transaction?: string; txHash?: string; error?: string; errorReason?: string };
+  let settle: SettlementReceipt | null = null;
   const settleHeader = paid.headers.get("X-PAYMENT-RESPONSE");
   if (settleHeader) {
     try {
-      settle = JSON.parse(Buffer.from(settleHeader, "base64").toString("utf8")) as typeof settle;
+      settle = JSON.parse(Buffer.from(settleHeader, "base64").toString("utf8")) as SettlementReceipt | null;
     } catch {
       settle = null;
     }

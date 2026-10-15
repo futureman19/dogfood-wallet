@@ -9,6 +9,8 @@
   },
   "scripts": {
     "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "verify": "bun run typecheck && bun test",
     "wallet": "bun src/cli.ts",
     "mcp": "bun src/mcp.ts"
   },
@@ -28,5 +30,10 @@
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "^1.99.0",
     "viem": "^2.57.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "bun-types": "1.3.9",
+    "typescript": "5.9.3"
   }
 }

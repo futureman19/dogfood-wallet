@@ -102,6 +102,20 @@ describe("merchant Solana rail", () => {
     expect(calls).toEqual(["sendTransaction", "getSignatureStatuses"]);
   });
 
+  test("rejects a transfer authority outside the message signer header before RPC", async () => {
+    const { fetchFn, calls } = world();
+    const payment = JSON.parse(Buffer.from(await payHeader(), "base64").toString());
+    const tx = VersionedTransaction.deserialize(Buffer.from(payment.payload.transaction, "base64"));
+    // Keep the payer as the transfer authority but remove its signer designation.
+    tx.message.header.numRequiredSignatures = 1;
+    tx.signatures = tx.signatures.slice(0, 1);
+    payment.payload.transaction = Buffer.from(tx.serialize()).toString("base64");
+    const res = await pay(mkApp(fetchFn), Buffer.from(JSON.stringify(payment)).toString("base64"));
+    expect(res.status).toBe(402);
+    expect((await res.json()).error).toContain("payer must be a signer");
+    expect(calls).toEqual([]);
+  });
+
   test("rejects an underpaying transaction before spending gas", async () => {
     const { fetchFn, calls } = world();
     const res = await pay(mkApp(fetchFn), await payHeader({ price: 999 }));

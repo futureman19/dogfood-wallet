@@ -36,7 +36,7 @@ export function generateAllowanceId(): string {
 export function deriveAllowanceKeys(ownerRoot: PrivateKey, agentIdentityPubHex: string, allowanceId: string) {
   const agentIdentity = compressedPub(agentIdentityPubHex);
   const deriver = new KeyDeriver(ownerRoot);
-  const protocol = AGENT_ALLOWANCE_PROTOCOL_ID;
+  const protocol: [2, "agent allowance"] = [...AGENT_ALLOWANCE_PROTOCOL_ID];
   const ownerPub = deriver.derivePublicKey(protocol, allowanceId, agentIdentity, true);
   const agentPub = deriver.derivePublicKey(protocol, allowanceId, agentIdentity, false);
   const ownerPriv = deriver.derivePrivateKey(protocol, allowanceId, agentIdentity);

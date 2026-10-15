@@ -98,7 +98,7 @@ export function createSolanaMerchant(cfg: SolanaMerchantConfig) {
     }
     const keys = tx.message.staticAccountKeys.map((k) => k.toBase58());
     if (keys[0] !== feePayer) throw invalid("fee payer must be this merchant");
-    if (tx.message.numRequiredSignatures > tx.signatures.length) throw invalid("malformed signature table");
+    if (tx.message.header.numRequiredSignatures > tx.signatures.length) throw invalid("malformed signature table");
 
     // Find the USDC transferChecked to our ATA with the exact price.
     let authorityIdx = -1;
@@ -118,7 +118,7 @@ export function createSolanaMerchant(cfg: SolanaMerchantConfig) {
       matched = true;
     }
     if (!matched) throw invalid("no USDC transfer to this merchant found");
-    if (authorityIdx < 0 || authorityIdx >= tx.message.numRequiredSignatures) throw invalid("payer must be a signer");
+    if (authorityIdx < 0 || authorityIdx >= tx.message.header.numRequiredSignatures) throw invalid("payer must be a signer");
 
     // The payer's signature must be present and valid over the message.
     const payerSig = tx.signatures[authorityIdx];

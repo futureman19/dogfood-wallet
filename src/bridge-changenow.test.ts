@@ -45,7 +45,7 @@ describe("changenowProvider", () => {
     const p = changenowProvider({
       apiKey: KEY,
       fetchFn: mockFetch((url, init) => {
-        body = JSON.parse(String(init?.body));
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         return {
           body: {
             ...fixture("changenow"),

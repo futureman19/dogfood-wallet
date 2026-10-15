@@ -1,3 +1,4 @@
+import { mockFetch } from "./test-support/fetch";
 import { describe, expect, test } from "bun:test";
 import { PrivateKey } from "@bsv/sdk";
 import {
@@ -44,7 +45,7 @@ describe("buildUsdcRequirement", () => {
 describe("parsePaymentHeader", () => {
   test("decodes base64 JSON; rejects garbage", () => {
     const good = { x402Version: 1, scheme: "exact", network: "base", payload: { signature: "0x12", authorization: {} } };
-    expect(parsePaymentHeader(Buffer.from(JSON.stringify(good)).toString("base64"))).toEqual(good);
+    expect<unknown>(parsePaymentHeader(Buffer.from(JSON.stringify(good)).toString("base64"))).toEqual(good);
     expect(() => parsePaymentHeader("not-base64!!!")).toThrow(MerchantError);
   });
 });
@@ -88,13 +89,13 @@ describe("verifyPayment", () => {
 describe("merchant app (full client<->merchant loop)", () => {
   test("402 without payment; 200 with a real client signature and facilitator settle", async () => {
     const facilitatorCalls: unknown[] = [];
-    const facilitatorFetch: typeof fetch = async (_url, init) => {
+    const facilitatorFetch = mockFetch(async (_url, init) => {
       facilitatorCalls.push(JSON.parse(String(init?.body)));
       return new Response(
         JSON.stringify({ success: true, transaction: "0x" + "ab".repeat(32), network: "base", payer: CLIENT_ADDR }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
-    };
+    });
     const app = createMerchantApp({ ...config, facilitatorFetch });
     const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: app });
     try {
@@ -128,11 +129,11 @@ describe("merchant app (full client<->merchant loop)", () => {
   });
 
   test("replay: the same nonce cannot buy twice", async () => {
-    const facilitatorFetch: typeof fetch = async () =>
+    const facilitatorFetch = mockFetch(async () =>
       new Response(JSON.stringify({ success: true, transaction: "0x" + "cd".repeat(32), network: "base" }), {
         status: 200,
         headers: { "content-type": "application/json" },
-      });
+      }));
     const app = createMerchantApp({ ...config, facilitatorFetch });
     const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: app });
     try {

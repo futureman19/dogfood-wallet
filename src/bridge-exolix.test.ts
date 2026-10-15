@@ -41,7 +41,7 @@ describe("exolixProvider", () => {
     let body: Record<string, unknown> | undefined;
     const p = exolixProvider({
       fetchFn: mockFetch((u, init) => {
-        body = JSON.parse(String(init?.body));
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         return {
           body: {
             ...fixture("exolix"), amount: 2.6,
