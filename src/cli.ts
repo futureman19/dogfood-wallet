@@ -24,7 +24,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts doctor
   bun src/cli.ts payment-inspect
   bun src/cli.ts allow <p2pkh-address>
-  bun src/cli.ts send <to-address> <sats> [note]
+  bun src/cli.ts send <to-address> <sats> [--max-fee <sats>] [--] [note]
   bun src/cli.ts fund-request <sats>
   bun src/cli.ts kill
   bun src/cli.ts sweep <p2pkh-address>
@@ -53,6 +53,8 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts mcp
   bun src/cli.ts mcp-http
 
+Send --max-fee: optional nonnegative safe integer, decimal digits only; actual miner fee ceiling.
+Use -- before literal note tokens beginning with -. No preview or automatic retry.
 The LLM never sees the key. Policy lives in the signer.
 allow, sweep, split, fund-request, allowance-*, and policy-inspect are human-only (not MCP tools).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
@@ -149,9 +151,29 @@ async function main() {
       console.log("STOP_SPENDING set. Sends will fail until a human deletes that file.");
       break;
     case "send": {
-      if (!a || !b) die("Usage: send <to-address> <sats> [note]");
+      if (!a || !b) die("Usage: send <to-address> <sats> [--max-fee <sats>] [--] [note]");
       const amount = Number(b);
-      const result = await sendPayment({ root, to: a, amount, note: rest.join(" ") });
+      let maxFeeSats: number | undefined;
+      const note: string[] = [];
+      for (let i = 0; i < rest.length; i++) {
+        const token = rest[i]!;
+        if (token === "--") {
+          note.push(...rest.slice(i + 1));
+          break;
+        }
+        if (token === "--max-fee") {
+          if (maxFeeSats !== undefined) die("REJECTED: Duplicate --max-fee.");
+          const value = rest[++i];
+          if (value === undefined || !/^[0-9]+$/.test(value) || !Number.isSafeInteger(Number(value))) {
+            die("REJECTED: --max-fee requires a nonnegative safe integer in decimal digits (separate token).");
+          }
+          maxFeeSats = Number(value);
+        } else {
+          if (token.startsWith("-")) die("REJECTED: Unknown send option. Use -- before literal note text beginning with '-'.");
+          note.push(token);
+        }
+      }
+      const result = await sendPayment({ root, to: a, amount, maxFeeSats, note: note.join(" ") });
       if (!result.ok) die(result.message);
       console.log(`txid: ${result.txid}`);
       console.log(`sent: ${result.amount} sats to ${result.to} (fee ${result.fee})`);

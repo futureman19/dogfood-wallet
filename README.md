@@ -48,7 +48,7 @@ bun src/cli.ts balance                 # plus evm-balance / sol-balance
 bun src/cli.ts status
 bun src/cli.ts doctor                 # offline metadata, no key decryption
 bun src/cli.ts allow <address>         # BSV P2PKH only; human-only
-bun src/cli.ts send <p2pkh-address> <sats> [note]
+bun src/cli.ts send <p2pkh-address> <sats> [--max-fee <sats>] [--] [note]
 bun src/cli.ts fund-request <sats>
 # or paste that address into the Yours button on https://dogfoodwallet.com
 bun src/cli.ts kill                    # writes STOP_SPENDING
@@ -57,6 +57,33 @@ bun src/cli.ts split [piece-sats]
 ```
 
 `allow`, `sweep`, `split`, and `fund-request` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. Split turns one fat UTXO into up to 20 even self-outputs so later agent sends are not serialized on a single coin. Split does **not** count against daily/lifetime caps. A **human** deletes `STOP_SPENDING` to resume agent sends. Agents must not.
+
+## Direct-send fee ceiling
+
+`send <to-address> <sats> --max-fee <fee-sats> [note]` optionally bounds the
+**actual miner fee**, not the payout. The signer validates each source transaction
+and checks input value minus all outputs (including omitted zero/one-sat change)
+before reserving, signing or broadcasting. Equality is accepted. Local payout caps,
+allowlist, killfile and any signed BRC-181 policy still apply; the stricter fee
+ceiling wins. This option never installs or modifies policy.
+
+The flag must follow the address and payout, with a separate decimal-digits token
+in the range 0 through 9007199254740991. Missing/duplicate flags, unknown options,
+`--max-fee=500`, signs, fractions, exponent/hex notation and whitespace in the fee
+token are rejected before funding lookup. Ordinary multiword notes still work;
+use `--` before literal note tokens beginning with `-` (all remaining tokens then
+become the note). Put the fee flag **before** that separator.
+
+Library callers use `sendPayment({ ..., maxFeeSats })`: invalid caps return
+`BAD_MAX_FEE` before vault/network access; excessive actual fees return `FEE_CAP`
+before reservation/signing. These refusals leave no new payment hold or spend row.
+Existing holds are never cleared. Ambiguous broadcast failures still retain holds;
+see [payment recovery](docs/payment-recovery.md), and never automatically retry.
+Omitting the option adds no new ceiling; local caps still count payout only.
+This option is limited to direct-send API/CLI, not MCP or other rails. It is not a
+preview, confirmation prompt, total-debit budget, or single-use approval token.
+For a separately approved owner-operated payment, use the
+[one-payment approval packet](docs/one-payment-acceptance.md).
 
 ## Paying HTTP 402
 

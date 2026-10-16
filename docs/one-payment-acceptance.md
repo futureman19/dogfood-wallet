@@ -28,26 +28,27 @@ of acceptance. Direct `evaluateSend` requires a positive safe integer, not the
 1,000-sat floor used by **split**. The proposed payout avoids a tiny payment;
 no claim is made about universal dust/relay rules or the acceptability of tiny change.
 
-**There is no `send --max-fee`, `--budget`, `--dry-run`, preview, or interactive
-confirmation flag.** Extra arguments become the note. Ordinary local policy caps
-charge the payout, not its fee. A balance snapshot or predicted input count is
-not a hard fee cap.
+Use the explicit `send ... --max-fee <approved-fee-sats>` flag for this packet.
+The proposed ceiling is `--max-fee 500`. The API validates a finite nonnegative
+safe integer before vault/funding access; the signer checks **source-validated
+input total minus all outputs**, including omitted change, before reservation,
+signing or broadcast. Equality is accepted; over-cap refusal leaves no new hold
+or spend row. Ordinary local policy caps charge payout, not fee.
 
-For this bounded packet, execution requires an existing, owner-reviewed valid
-signed `brc181.json` whose finite nonnegative integer `max_fee` is **at most the
-approved fee ceiling**, and whose destination, origin, per-tx/destination caps
-and remaining cumulative `total_budget` permit the payment. The signer checks
-this envelope both before funding lookup and with the actual fee **before
-reservation/signing**. Its cumulative budget includes payout plus fees for
+Any existing signed `brc181.json` remains mandatory and is ANDed with local policy
+and this explicit ceiling. Its destination, origin, per-tx/destination caps, fee
+cap and remaining cumulative `total_budget` must also permit the payment. The
+stricter fee ceiling wins. Its cumulative budget includes payout plus fees for
 ordinary/legacy BSV and bridge-BSV usage; do not reset history to gain headroom.
-The approved exact payout plus enforced fee ceiling bounds this one debit;
-this is not a claim that local policy enforces a one-shot approval token.
+A signed policy is **not required solely to add this one-send fee ceiling**.
+If an existing envelope is invalid or incompatible, stop: do not edit its signed
+payload, remove it, substitute a sample or invent a CLI issuer. Policy provisioning
+or mutation requires separate review and permission; this flag never changes it.
 
-If that signed fee limit is absent, invalid, too loose, or otherwise incompatible,
-**STOP: the current CLI is not ready for this bounded acceptance.** Do not edit a
-signed payload, remove the envelope, substitute a sample, or invent a CLI issuer.
-Preparing/installing an appropriate owner-signed policy needs separate review and
-permission. No policy provisioning or send wrapper is included here.
+The approved exact payout plus enforced fee ceiling bounds this one debit. There
+is no `--budget`, `--dry-run`, preview or interactive confirmation flag, and no
+single-use approval token. Omitting `--max-fee` adds no new ceiling and is **not
+acceptable for this bounded packet**. A balance snapshot is not a hard fee cap.
 
 ## Owner preflight (only after permission for the selected wallet)
 
@@ -77,7 +78,7 @@ permission. No policy provisioning or send wrapper is included here.
    complete initialization, intact current policy/accounting, no unresolved hold
    or parked exposure, and no killfile at execution. Doctor is metadata-only;
    address/status decrypt the local key. None proves funding or settlement.
-   Owner-local review must also validate the signed fee gate above and current
+   Owner-local review must also validate the explicit fee flag, any signed policy and current
    daily/lifetime headroom. Missing/unrestricted policy is not acceptable for this
    packet: require an explicit restricted allowlist containing the approved payee.
 4. Independently obtain the full destination from the recipient's authenticated
@@ -103,8 +104,12 @@ separate operations. Do not change caps merely to force success.
 
 ## Execute once, only after explicit final approval
 
-The reference syntax is `bun src/cli.ts send <to-address> <sats> [note]`.
-The operator substitutes the approved full address and integer payout only after
+The reference syntax is `bun src/cli.ts send <to-address> <sats> --max-fee <approved-fee-sats> [note]`.
+For the unchanged proposal, the payout token is `1000` and fee flag is `--max-fee 500`.
+The fee token must be separate decimal digits, a nonnegative safe integer; missing,
+duplicate or malformed options are rejected, not logged as notes. Use `--` before
+literal note tokens beginning with `-`; the fee flag must precede this separator.
+The operator substitutes the approved full address, payout and fee ceiling only after
 all gates pass. The optional note may contain a nonsecret approval reference;
 it is neither an idempotency key nor recipient evidence. **This command signs and
 broadcasts immediately.** No executable send script is supplied by this packet.
@@ -154,7 +159,8 @@ no automatic reconciliation or ordinary-send reconcile CLI exists.
 > **[named operator]**, before **[expiry/timezone]**, to perform the selected wallet's
 > offline preflight and online read-only funding/settlement checks, and then **one
 > CLI direct send invocation only if every gate in this packet passes**, including
-> the existing signed fee cap and ARC-to-WoC same-transaction fee-rejection fallback?
+> the explicit `--max-fee` ceiling, any existing signed policy, and ARC-to-WoC
+> same-transaction fee-rejection fallback?
 > Record approval **[reference]** and the recipient-confirmation channel **[channel]**.
 > This does not authorize funding, initialization, policy/allowlist edits, signed
 > policy issuance, killfile/hold changes, split, sweep, retry or another rail.
@@ -166,7 +172,8 @@ in preparing this document.
 
 ### Source verification
 
-Checked against repository baseline `c6093453b3d535a6f0a479893d1998f887489443`:
+Updated for the direct-send fee-ceiling change on baseline
+`2fa9e406dd617cef96cbc3756cdc38c92636f4bc`:
 `src/cli.ts` (command parsing), `src/send.ts` (fee/source checks and broadcaster),
 `src/policy.ts` (amount-only caps/address regex), `src/brc181.ts` (signed fee and
 cumulative budget gates), and the linked recovery/backup docs. Re-review if the

@@ -102,10 +102,15 @@ export async function sendPayment(opts: {
   amount: number;
   note?: string;
   origin?: string;
+  /** Optional miner-fee ceiling in sats; independent of local and signed policy. */
+  maxFeeSats?: number;
   fetchUtxos?: (address: string) => Promise<Utxo[]>;
   fetchTxHex?: (txid: string) => Promise<string>;
   broadcast?: (raw: string) => Promise<{ txid: string }>;
 }): Promise<SendResult> {
+  if (opts.maxFeeSats !== undefined && (!Number.isSafeInteger(opts.maxFeeSats) || opts.maxFeeSats < 0)) {
+    return { ok: false, code: "BAD_MAX_FEE", message: "REJECTED: maxFeeSats must be a finite nonnegative safe integer." };
+  }
   try {
     return await withPaymentGuard(opts.root, "send", async (guard) => {
       const vault = loadVault(opts.root);
@@ -147,12 +152,13 @@ export async function sendPayment(opts: {
         };
       }
       const change = total - opts.amount - estimatedFee;
-      const fee = estimatedFee + (change > 1 ? 0 : change);
+      // Preserve the existing signed-policy rejection before source lookups.
+      const plannedFee = estimatedFee + (change > 1 ? 0 : change);
       const post = gateAgentSend({
         envelope: loaded.envelope,
         to: opts.to,
         amount: opts.amount,
-        fee,
+        fee: plannedFee,
         spentTotal: loadUsage(opts.root, new Date(), "brc181-bsv").spentLifetime,
         origin: opts.origin,
       });
@@ -180,6 +186,14 @@ export async function sendPayment(opts: {
       tx.addOutput({ satoshis: opts.amount, lockingScript: new P2PKH().lock(opts.to) });
       if (change > 1) {
         tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(vault.address) });
+      }
+      // Sources above are bound to the selected outpoints, values and vault script.
+      // Authorize the actual transaction debit, including any omitted change.
+      const fee = tx.inputs.reduce((sum, input) => sum + input.sourceTransaction!.outputs[input.sourceOutputIndex]!.satoshis!, 0)
+        - tx.outputs.reduce((sum, output) => sum + output.satoshis!, 0);
+      if (fee !== plannedFee) throw new Error("Invalid send source fee");
+      if (opts.maxFeeSats !== undefined && fee > opts.maxFeeSats) {
+        return { ok: false, code: "FEE_CAP", message: `REJECTED: Miner fee ${fee} sats exceeds maxFeeSats ${opts.maxFeeSats}.` };
       }
       guard.reserve({ asset: "bsv", amount: opts.amount, to: opts.to, fee });
       await tx.sign();
