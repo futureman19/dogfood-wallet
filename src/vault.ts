@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PrivateKey } from "@bsv/sdk";
 import {
   DEFAULT_MAX_SATS,
@@ -52,26 +52,84 @@ function decryptWif(root: string): string {
   return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
 }
 
-export function initVault(root: string, maxSatsPerTx = DEFAULT_MAX_SATS): { address: string } {
-  const p = vaultPaths(root);
-  if (existsSync(p.enc) || existsSync(p.wrap)) {
-    throw new Error("Vault already initialized. Refusing to overwrite.");
+const INIT_DIR = ".init";
+const INIT_COMPLETE = "complete\n";
+const INIT_REFUSAL = "Vault already initialized, nonempty, or initialization interrupted/in progress. Refusing to overwrite; preserve all files for manual recovery.";
+
+function syncInitDirectory(path: string): void {
+  // Windows Node/Bun cannot open directories for fsync. File flushes below are
+  // mandatory; this is NOT a machine power-loss or remote-filesystem guarantee.
+  if (process.platform === "win32") return;
+  const fd = openSync(path, "r");
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+
+function writeInitFile(path: string, data: string | Buffer): void {
+  const fd = openSync(path, "wx", 0o600);
+  try {
+    writeFileSync(fd, data);
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
+}
+
+function checkInitialization(root: string): void {
+  const stage = join(root, INIT_DIR);
+  try {
+    try { lstatSync(stage); } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return; // Legacy vault.
+      throw e;
+    }
+    if (readFileSync(join(stage, "complete"), "utf8") !== INIT_COMPLETE) throw new Error();
+  } catch {
+    throw new Error("Vault initialization incomplete or unreadable. Preserve all files for manual recovery.");
   }
-  mkdirSync(root, { recursive: true });
-  const key = PrivateKey.fromRandom();
-  const address = key.toAddress();
-  const wrap = randomBytes(32);
-  writeFileSync(p.wrap, wrap, { mode: 0o600 });
-  writeFileSync(p.enc, encryptWif(key.toWif(), wrap), { mode: 0o600 });
-  writeFileSync(p.address, `${address}\n`, { mode: 0o644 });
-  writePolicyFile(root, {
-    maxSatsPerTx,
-    maxSatsPerDay: DEFAULT_MAX_SATS_PER_DAY,
-    maxSatsLifetime: null,
-    allowlist: [],
-    killfileOn: false,
-  });
-  return { address };
+}
+
+export function initVault(root: string, maxSatsPerTx = DEFAULT_MAX_SATS): { address: string } {
+  try {
+    // Refuse every pre-existing artifact, not just key filenames. An existing
+    // empty directory is supported; never chmod an owner's existing directory.
+    if (existsSync(root) && readdirSync(root).length !== 0) throw new Error();
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+    const stage = join(root, INIT_DIR);
+    mkdirSync(stage, { mode: 0o700 }); // Exclusive atomic claim, never stolen/deleted.
+    syncInitDirectory(root);
+    syncInitDirectory(dirname(root));
+    if (readdirSync(root).some(name => name !== INIT_DIR)) throw new Error();
+
+    const key = PrivateKey.fromRandom();
+    const address = key.toAddress();
+    const wrap = randomBytes(32);
+    const contents: Record<string, string | Buffer> = {
+      "wrap.key": wrap,
+      "wif.enc": encryptWif(key.toWif(), wrap),
+      "address.txt": `${address}\n`,
+      "policy.json": `${JSON.stringify({ maxSatsPerTx, maxSatsPerDay: DEFAULT_MAX_SATS_PER_DAY,
+        maxSatsLifetime: null, allowlist: [] }, null, 2)}\n`,
+    };
+    for (const [name, data] of Object.entries(contents)) writeInitFile(join(stage, name), data);
+    syncInitDirectory(stage);
+    if (loadVaultFiles(stage).address !== address) throw new Error();
+    // rename is not a portable no-replace primitive (POSIX may replace an empty
+    // destination directory; Windows differs). Hard links publish each flushed
+    // file exclusively on the same filesystem. Unsupported filesystems fail shut.
+    // Retain staging evidence, including keys; never auto-clean an interrupted init.
+    for (const name of Object.keys(contents)) linkSync(join(stage, name), join(root, name));
+    syncInitDirectory(root);
+    if (loadVaultFiles(root).address !== address) throw new Error();
+    // Explicit reader boundary: no new-layout load until all files validate.
+    writeInitFile(join(stage, "ready"), INIT_COMPLETE);
+    syncInitDirectory(stage);
+    linkSync(join(stage, "ready"), join(stage, "complete"));
+    syncInitDirectory(stage);
+    const loaded = loadVault(root);
+    if (loaded.address !== address) throw new Error();
+    return { address: loaded.address };
+  } catch {
+    // Filesystem/decryption errors can contain sensitive data. No raw cause.
+    // Even a failure after completion never triggers rollback or a new key.
+    throw new Error(INIT_REFUSAL);
+  }
 }
 
 function optionalCap(value: unknown): number | null {
@@ -145,24 +203,6 @@ function parseEvmBlock(raw: unknown): { usdc?: EvmAssetPolicy } | undefined {
         : null,
     },
   };
-}
-
-function writePolicyFile(root: string, policy: Policy): void {
-  const p = vaultPaths(root);
-  writeFileSync(
-    p.policy,
-    `${JSON.stringify(
-      {
-        maxSatsPerTx: policy.maxSatsPerTx,
-        maxSatsPerDay: policy.maxSatsPerDay,
-        maxSatsLifetime: policy.maxSatsLifetime,
-        allowlist: policy.allowlist,
-      },
-      null,
-      2,
-    )}\n`,
-    { mode: 0o644 },
-  );
 }
 
 // Only call after validating JSON and the BSV allowlist shape. Locate its raw
@@ -247,6 +287,11 @@ export type LoadedVault = {
 };
 
 export function loadVault(root: string): LoadedVault {
+  checkInitialization(root);
+  return loadVaultFiles(root);
+}
+
+function loadVaultFiles(root: string): LoadedVault {
   const p = vaultPaths(root);
   if (!existsSync(p.enc) || !existsSync(p.wrap) || !existsSync(p.address)) {
     throw new Error("Vault not initialized. Run: dogfood-wallet init");
