@@ -50,13 +50,14 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts allowance-sweep [p2pkh-address]
   bun src/cli.ts allowance-sweep --record <record-id> [p2pkh-address]
   bun src/cli.ts policy-inspect <envelope-json-or-file>
+  bun src/cli.ts policy-issue --origin <token> --per-tx <n> --total <n> --max-fee <n> --purpose <text> [--allow <dest>]... [--dest-cap <dest>=<n>]... [--expires <epoch>] [--write] [--force]
   bun src/cli.ts mcp
   bun src/cli.ts mcp-http
 
 Send --max-fee: optional nonnegative safe integer, decimal digits only; actual miner fee ceiling.
 Use -- before literal note tokens beginning with -. No preview or automatic retry.
 The LLM never sees the key. Policy lives in the signer.
-allow, sweep, split, fund-request, allowance-*, and policy-inspect are human-only (not MCP tools).
+allow, sweep, split, fund-request, allowance-*, policy-inspect, and policy-issue are human-only (not MCP tools).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
 
@@ -282,6 +283,26 @@ async function main() {
       if (!result.ok) die(result.message);
       console.log(`txid: ${result.txid}`);
       console.log(`swept: ${result.amount} sats (fee ${result.fee})`);
+      break;
+    }
+    case "policy-issue": {
+      // Human-only: mint a signed BRC-181 envelope with the vault key as issuer.
+      // Prints the envelope JSON; --write installs it as the vault's brc181.json
+      // (gates every payment rail), --force replaces an installed envelope.
+      const { issuePolicyEnvelope, parsePolicyIssueFlags, writePolicyEnvelope } = await import("./policy-issue");
+      const flags = parsePolicyIssueFlags([a, b, ...rest].filter((x): x is string => typeof x === "string"));
+      if (!flags.ok) die(flags.message);
+      try {
+        const envelope = issuePolicyEnvelope(loadVault(root).key, flags.value);
+        if (flags.value.write) {
+          writePolicyEnvelope(root, envelope, { force: flags.value.force });
+          console.log("brc181.json installed. It now gates every rail alongside policy.json — review any time with policy-inspect.");
+        } else {
+          console.log(JSON.stringify(envelope, null, 2));
+        }
+      } catch (e) {
+        die(e instanceof Error ? e.message : "REJECTED: could not issue the policy envelope.");
+      }
       break;
     }
     case "policy-inspect": {
