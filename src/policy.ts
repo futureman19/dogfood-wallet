@@ -311,6 +311,17 @@ export function utcDay(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Signed BRC-181 total_budget gets its own read-only scope per rail over the
+// spend log. brc181-bsv is cumulative payout plus miner fees in sats (legacy
+// BSV rows count; bridge deposits count). The USDC scopes count only their own
+// payment asset: bridge arrival legs are inbound, and facilitator-paid rails
+// carry no client fee. Local ordinary/bridge policy scopes remain separate.
+const BRC181_SCOPES: Record<string, string[]> = {
+  "brc181-bsv": ["bsv", "bridge-bsv"],
+  "brc181-usdc-base": ["usdc-base"],
+  "brc181-usdc-solana": ["usdc-solana"],
+};
+
 export function usageFromLog(lines: string[], now: Date = new Date(), asset = "bsv"): Usage {
   const today = utcDay(now);
   let spentToday = 0;
@@ -322,9 +333,7 @@ export function usageFromLog(lines: string[], now: Date = new Date(), asset = "b
       const row = JSON.parse(trimmed) as { t?: string; amount?: unknown; fee?: unknown; kind?: unknown; asset?: unknown };
       if (row.kind === "sweep" || row.kind === "split" || row.kind === "allowance-sweep") continue;
       const rowAsset = typeof row.asset === "string" ? row.asset : "bsv";
-      // Signed BRC-181 total_budget is cumulative payout plus miner fees in sats.
-      // Local ordinary/bridge policy scopes remain separate. Legacy BSV rows count.
-      if (asset === "brc181-bsv" ? !["bsv", "bridge-bsv"].includes(rowAsset) : rowAsset !== asset) continue;
+      if (!(BRC181_SCOPES[asset] ?? [asset]).includes(rowAsset)) continue;
       let amount =
         typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
       if (asset === "brc181-bsv" && typeof row.fee === "number" && Number.isSafeInteger(row.fee) && row.fee > 0) amount += row.fee;

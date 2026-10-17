@@ -7,6 +7,7 @@ import {
   type SolanaExactRequirement,
 } from "./solana";
 import { evaluateSolanaSend, type EvmAssetPolicy, type Usage } from "./policy";
+import { canonicalSolanaDest, gateAgentSend, type PolicyEnvelope } from "./brc181";
 
 // x402 (`exact` scheme) settlement for the Solana pocket, mirroring
 // evm-x402.ts: GET -> 402 -> pick exact/solana(-devnet)/USDC -> policy gate ->
@@ -68,6 +69,11 @@ export async function settleSolanaX402(opts: {
   requireReceipt?: boolean;
   beforeSign?: (intent: PaymentIntent) => void;
   onSpend?: (row: Record<string, unknown>) => void;
+  /** Signed BRC-181 policy envelope. When present it ANDs with policy.json. */
+  policyEnvelope?: PolicyEnvelope | null;
+  /** Lifetime spend inside the envelope's own brc181-usdc-solana scope. */
+  brc181SpentTotal?: number;
+  origin?: string;
 }): Promise<SolanaSettleResult> {
   const fetchFn = opts.fetchFn ?? fetch;
 
@@ -87,6 +93,25 @@ export async function settleSolanaX402(opts: {
   const amount = Number(req.maxAmountRequired);
   const decision = evaluateSolanaSend(opts.pocket, opts.killfileOn, amount, req.payTo, opts.usage);
   if (!decision.ok) throw new SolanaX402Error(decision.code, decision.message);
+
+  // A signed BRC-181 envelope gates this rail too. Its numeric fields are read
+  // in the rail's native units (USDC base units here); the merchant is the
+  // feePayer, so the client-side fee is 0.
+  let dest: string;
+  try {
+    dest = canonicalSolanaDest(req.payTo);
+  } catch {
+    throw new SolanaX402Error("BAD_ADDRESS", "REJECTED: USDC payee is not a valid Solana address.");
+  }
+  const gate = gateAgentSend({
+    envelope: opts.policyEnvelope,
+    dest,
+    amount,
+    fee: 0,
+    spentTotal: opts.brc181SpentTotal ?? opts.usage.spentLifetime,
+    origin: opts.origin,
+  });
+  if (!gate.ok) throw new SolanaX402Error(gate.code, gate.message);
 
   opts.beforeSign?.({ asset: "usdc-solana", amount, to: req.payTo });
   const header = await buildSolanaX402PaymentHeader({ key: opts.key, requirement: req, fetchFn });

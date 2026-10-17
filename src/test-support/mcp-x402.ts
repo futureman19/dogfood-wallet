@@ -31,8 +31,9 @@ try {
   };
   writeFileSync(paths.policy, JSON.stringify({ maxSatsPerTx: failure === "cap" ? 499 : 1000, maxSatsPerDay: 1000, maxSatsLifetime: null, allowlist: failure === "allowlist" ? [] : [bsvPayee], evm: { usdc: pocket(basePayee) }, solana: { usdc: pocket(solPayee) } }));
   if (failure === "kill") writeFileSync(paths.kill, "fixture");
-  // Invalid signed policy must block BSV but must not block another currency.
-  if (failure === "brc181" || rail !== "bsv") writeFileSync(paths.brc181, "invalid fixture");
+  // An invalid signed policy envelope is fail-closed on EVERY rail: it blocks
+  // the payment without falling through to another currency.
+  if (failure === "brc181") writeFileSync(paths.brc181, "invalid fixture");
   const seed = ["bsv", "usdc-base", "usdc-solana"].map(a => ({ t: new Date().toISOString(), kind: "send", asset: a, amount: a === asset ? (failure === "day" ? 600 : 100) : 9000 }));
   writeFileSync(paths.log, seed.map(r => JSON.stringify(r)).join("\n") + "\n");
   const source = new Transaction();

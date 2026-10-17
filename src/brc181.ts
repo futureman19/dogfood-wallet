@@ -56,6 +56,20 @@ export function canonicalDest(lockingScriptHex: string): string | null {
   return `script:${createHash("sha256").update(b).digest("hex")}`;
 }
 
+/** Canonical envelope destination for an EVM payee: evm:<lowercase address>. */
+export function canonicalEvmDest(address: string): string {
+  const a = address.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(a)) throw new Error("BAD_ADDRESS");
+  return `evm:${a.toLowerCase()}`;
+}
+
+/** Canonical envelope destination for a Solana payee: solana:<base58 address>. */
+export function canonicalSolanaDest(address: string): string {
+  const a = address.trim();
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) throw new Error("BAD_ADDRESS");
+  return `solana:${a}`;
+}
+
 function assertExactFields(payload: Record<string, unknown>): void {
   const keys = Object.keys(payload);
   if (keys.length !== MUST_FIELDS.length || MUST_FIELDS.some((k) => !(k in payload))) {
@@ -115,13 +129,33 @@ export function evaluatePolicyRequest(
   req: { origin: string; payout: number; lockingScriptHex: string; fee: number; spentTotal: number },
 ): PolicyVerdict {
   assertExactFields(payload);
+  return evaluateCore(payload, req, () => canonicalDest(req.lockingScriptHex));
+}
+
+/** Multi-chain form: the caller supplies the pre-canonical destination
+ *  (p2pkh:… / script:… / evm:… / solana:…). Numeric envelope fields are
+ *  interpreted in the native units of the asset being spent — sats on BSV,
+ *  USDC base units on the dollar rails. No price conversion. */
+export function evaluatePolicyDest(
+  payload: Record<string, unknown>,
+  req: { origin: string; payout: number; dest: string | null; fee: number; spentTotal: number },
+): PolicyVerdict {
+  assertExactFields(payload);
+  return evaluateCore(payload, req, () => req.dest);
+}
+
+function evaluateCore(
+  payload: Record<string, unknown>,
+  req: { origin: string; payout: number; fee: number; spentTotal: number },
+  destFn: () => string | null,
+): PolicyVerdict {
   if (payload.type !== POLICY_TYPE) return { verdict: "REJECT", reason: "unrecognized policy type" };
   if (req.origin !== payload.origin_token) return { verdict: "REJECT", reason: "origin not bound" };
   const maxFee = payload.max_fee as number;
   if (req.fee > maxFee) return { verdict: "REJECT", reason: "over max fee" };
   const perTx = payload.per_tx_cap as number;
   if (req.payout > perTx) return { verdict: "REJECT", reason: "over per-tx cap" };
-  const dest = canonicalDest(req.lockingScriptHex);
+  const dest = destFn();
   const allow = payload.dest_allowlist as string[];
   const caps = payload.dest_caps as Array<[string, number]>;
   const capEntry = dest ? caps.find((c) => c[0] === dest) : undefined;
@@ -147,6 +181,9 @@ export function gateAgentSend(opts: {
   envelope: PolicyEnvelope | null | undefined;
   to?: string;
   lockingScriptHex?: string;
+  /** Pre-canonical destination for non-BSV rails ("evm:…" / "solana:…").
+   *  When given, no BSV address or locking script is required. */
+  dest?: string;
   amount: number;
   fee: number;
   spentTotal: number;
@@ -155,21 +192,27 @@ export function gateAgentSend(opts: {
   if (!opts.envelope) return { ok: true };
   const verified = verifyPolicyEnvelope(opts.envelope);
   if (!verified.ok) return verified;
-  let lockingScriptHex = opts.lockingScriptHex;
-  if (!lockingScriptHex) {
-    if (!opts.to) return { ok: false, code: "BAD_ADDRESS", message: "REJECTED: Destination is missing." };
-    try {
-      lockingScriptHex = new P2PKH().lock(opts.to).toHex();
-    } catch {
-      return { ok: false, code: "BAD_ADDRESS", message: "REJECTED: Destination is not a P2PKH address." };
+  let dest: string | null;
+  if (opts.dest !== undefined) {
+    dest = opts.dest;
+  } else {
+    let lockingScriptHex = opts.lockingScriptHex;
+    if (!lockingScriptHex) {
+      if (!opts.to) return { ok: false, code: "BAD_ADDRESS", message: "REJECTED: Destination is missing." };
+      try {
+        lockingScriptHex = new P2PKH().lock(opts.to).toHex();
+      } catch {
+        return { ok: false, code: "BAD_ADDRESS", message: "REJECTED: Destination is not a P2PKH address." };
+      }
     }
+    dest = canonicalDest(lockingScriptHex);
   }
   const origin =
     opts.origin ?? process.env.DOGFOOD_ORIGIN_TOKEN ?? String(opts.envelope.payload.origin_token ?? "");
-  const verdict = evaluatePolicyRequest(opts.envelope.payload, {
+  const verdict = evaluatePolicyDest(opts.envelope.payload, {
     origin,
     payout: opts.amount,
-    lockingScriptHex,
+    dest,
     fee: opts.fee,
     spentTotal: opts.spentTotal,
   });

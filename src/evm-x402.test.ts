@@ -4,6 +4,7 @@ import { PrivateKey } from "@bsv/sdk";
 import { settleUsdcX402, UsdcX402Error } from "./evm-x402";
 import { USDC_BASE } from "./evm";
 import type { EvmAssetPolicy } from "./policy";
+import { makePayload, signEnvelope } from "./test-support/brc181";
 
 const KEY = PrivateKey.fromHex("0".repeat(63) + "1");
 const FROM = "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf";
@@ -158,5 +159,124 @@ describe("settleUsdcX402", () => {
 
   test("UsdcX402Error carries a code", () => {
     expect(new UsdcX402Error("UNSUPPORTED", "x").code).toBe("UNSUPPORTED");
+  });
+});
+
+describe("settleUsdcX402 BRC-181 envelope gate", () => {
+  const EVM_DEST = `evm:${PAY_TO.toLowerCase()}`;
+
+  function gateWorld() {
+    const calls: { url: string; payment?: string | null }[] = [];
+    const fetchFn = mockFetch(async (input, init) => {
+      const url = String(input);
+      const payment = (init?.headers as Record<string, string> | undefined)?.["X-PAYMENT"] ?? null;
+      calls.push({ url, payment });
+      if (!payment) return jsonResponse(402, acceptsBody());
+      const settle = { success: true, transaction: "0x" + "22".repeat(32), network: "base", payer: FROM };
+      return jsonResponse(200, { data: "premium" }, { "X-PAYMENT-RESPONSE": Buffer.from(JSON.stringify(settle)).toString("base64") });
+    });
+    return { calls, fetchFn };
+  }
+
+  test("allowlisted dest inside caps settles and logs the spend", async () => {
+    const { calls, fetchFn } = gateWorld();
+    const spends: Record<string, unknown>[] = [];
+    const r = await settleUsdcX402({
+      url: "https://api.example.com/premium",
+      key: KEY,
+      from: FROM,
+      pocket,
+      killfileOn: false,
+      usage: { spentToday: 0, spentLifetime: 0 },
+      fetchFn,
+      onSpend: (row) => spends.push(row),
+      now: 1_700_000_000,
+      policyEnvelope: signEnvelope(makePayload({ dest_allowlist: [EVM_DEST] })),
+      origin: "test-origin",
+    });
+    expect(r.ok).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(spends).toHaveLength(1);
+  });
+
+  test("off-allowlist dest refuses before signing: one fetch, no hold, no spend", async () => {
+    const { calls, fetchFn } = gateWorld();
+    const spends: unknown[] = [];
+    let reserved = false;
+    await expect(
+      settleUsdcX402({
+        url: "https://api.example.com/premium",
+        key: KEY,
+        from: FROM,
+        pocket,
+        killfileOn: false,
+        usage: { spentToday: 0, spentLifetime: 0 },
+        fetchFn,
+        beforeSign: () => { reserved = true; },
+        onSpend: (row) => spends.push(row),
+        policyEnvelope: signEnvelope(makePayload({ dest_allowlist: [`evm:0x${"0".repeat(40)}`] })),
+        origin: "test-origin",
+      }),
+    ).rejects.toMatchObject({ code: "POLICY" });
+    expect(calls).toHaveLength(1);
+    expect(reserved).toBe(false);
+    expect(spends).toHaveLength(0);
+  });
+
+  test("envelope per-tx cap below the price refuses in USDC base units", async () => {
+    const { calls, fetchFn } = gateWorld();
+    await expect(
+      settleUsdcX402({
+        url: "https://api.example.com/premium",
+        key: KEY,
+        from: FROM,
+        pocket,
+        killfileOn: false,
+        usage: { spentToday: 0, spentLifetime: 0 },
+        fetchFn,
+        policyEnvelope: signEnvelope(makePayload({ dest_allowlist: [EVM_DEST], per_tx_cap: 9_999 })),
+        origin: "test-origin",
+      }),
+    ).rejects.toMatchObject({ code: "POLICY" });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("envelope total budget is consumed by the brc181 USDC usage scope", async () => {
+    const { calls, fetchFn } = gateWorld();
+    await expect(
+      settleUsdcX402({
+        url: "https://api.example.com/premium",
+        key: KEY,
+        from: FROM,
+        pocket,
+        killfileOn: false,
+        usage: { spentToday: 0, spentLifetime: 0 },
+        brc181SpentTotal: 95_000,
+        fetchFn,
+        policyEnvelope: signEnvelope(makePayload({ dest_allowlist: [EVM_DEST] })),
+        origin: "test-origin",
+      }),
+    ).rejects.toMatchObject({ code: "POLICY" });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("tampered envelope refuses with BAD_SIG", async () => {
+    const { calls, fetchFn } = gateWorld();
+    const env = signEnvelope(makePayload({ dest_allowlist: [EVM_DEST] }));
+    env.payload.per_tx_cap = 1;
+    await expect(
+      settleUsdcX402({
+        url: "https://api.example.com/premium",
+        key: KEY,
+        from: FROM,
+        pocket,
+        killfileOn: false,
+        usage: { spentToday: 0, spentLifetime: 0 },
+        fetchFn,
+        policyEnvelope: env,
+        origin: "test-origin",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_SIG" });
+    expect(calls).toHaveLength(1);
   });
 });

@@ -132,7 +132,7 @@ Claude Desktop example (replace all absolute paths; no client `cwd` support assu
 
 Use your client's documented config schema, with the same absolute executable/script paths and explicit vault environment. See the [connection walkthrough](docs/quickstart.md#4-connect-one-agent-choose-stdio-or-http).
 
-`x402_pay({ url })` uses the same payment orchestration as CLI `x402-pay`: **BSV sats → Base USDC → Solana USDC**, falling through only on `UNSUPPORTED`. Policy, funding, and settlement errors stop immediately. Caps, allowlists, killfile, optional BRC-181 checks for BSV, and per-asset spend logs apply on both surfaces. Base and Solana require human-configured `evm.usdc` / `solana.usdc` policy blocks. Success returns the selected rail's CLI result shape; failures return `isError: true` with `{ ok: false, code, message }`.
+`x402_pay({ url })` uses the same payment orchestration as CLI `x402-pay`: **BSV sats → Base USDC → Solana USDC**, falling through only on `UNSUPPORTED`. Policy, funding, and settlement errors stop immediately. Caps, allowlists, killfile, optional BRC-181 envelope checks on every rail, and per-asset spend logs apply on both surfaces. Base and Solana require human-configured `evm.usdc` / `solana.usdc` policy blocks. Success returns the selected rail's CLI result shape; failures return `isError: true` with `{ ok: false, code, message }`.
 
 HTTP (loopback, stateless POST `/mcp`):
 
@@ -233,9 +233,9 @@ Existing `allowance.json` is read in place as record ID `legacy`, never overwrit
 bun src/cli.ts policy-inspect <envelope-json-or-file>
 ```
 
-Verifies a signed `brc-181/agent-policy/1` envelope against frozen vectors (`testdata/brc-181-vectors.json`). Canonical dest is `p2pkh:<hash160>` or `script:<sha256>`; OP_RETURN is not a dest. Human-only inspect. Not MCP.
+Verifies a signed `brc-181/agent-policy/1` envelope against frozen vectors (`testdata/brc-181-vectors.json`). Canonical dests are `p2pkh:<hash160>` / `script:<sha256>` on BSV (OP_RETURN is not a dest), `evm:<lowercase address>` on Base, and `solana:<base58 address>` on Solana. Human-only inspect. Not MCP.
 
-If the vault contains `brc181.json`, **`send` and `x402-delegate` also verify the envelope and enforce it** (AND with local `policy.json`). Origin is `DOGFOOD_ORIGIN_TOKEN` or the record's `origin_token`. Sweep/split ignore the envelope. A Vector A `max_fee` of 100 sats will reject a typical P2PKH fee — issue a record with a real fee cap. x402-delegate charges local fee 0 because its sponsor covers fees; client-funded mode still debits and accounts the challenge amount.
+If the vault contains `brc181.json`, **every payment rail verifies the envelope and enforces it** (AND with local `policy.json`): `send`, `x402-delegate`, and `x402-pay` on BSV, Base USDC, and Solana USDC alike. Numeric envelope fields are read in the native units of the rail's asset (sats on BSV, USDC base units on the dollar rails); the facilitator pays gas on USDC settles, so their client-side fee is 0. Origin is `DOGFOOD_ORIGIN_TOKEN` or the record's `origin_token`. Sweep/split ignore the envelope. A Vector A `max_fee` of 100 sats will reject a typical P2PKH fee — issue a record with a real fee cap. x402-delegate charges local fee 0 because its sponsor covers fees; client-funded mode still debits and accounts the challenge amount. Envelope budgets draw from their own per-rail log scopes (`brc181-bsv`, `brc181-usdc-base`, `brc181-usdc-solana`), kept separate from ordinary policy usage.
 
 ## Not this
 

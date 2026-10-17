@@ -4,12 +4,15 @@ import { join } from "node:path";
 import {
   POLICY_TYPE,
   canonicalDest,
+  canonicalEvmDest,
+  canonicalSolanaDest,
   canonicalPayloadBytes,
   payloadDigest,
   verifyPolicyEnvelope,
   evaluatePolicyRequest,
   gateAgentSend,
 } from "./brc181";
+import { makePayload, signEnvelope } from "./test-support/brc181";
 
 const vectors = JSON.parse(
   readFileSync(join(import.meta.dir, "..", "testdata", "brc-181-vectors.json"), "utf8"),
@@ -221,6 +224,107 @@ describe("gateAgentSend", () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("POLICY");
+  });
+});
+
+describe("BRC-181 multi-chain canonical destinations", () => {
+  const EVM_TO = "0x209693Bc6afc0C5328bA36FaF03C18EF3122C5EA";
+  const SOL_TO = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+
+  test("EVM dest is evm:<lowercase address>", () => {
+    expect(canonicalEvmDest(EVM_TO)).toBe("evm:0x209693bc6afc0c5328ba36faf03c18ef3122c5ea");
+  });
+
+  test("EVM dest rejects malformed addresses", () => {
+    for (const bad of [
+      "",
+      "0x1234",
+      "209693Bc6afc0C5328bA36FaF03C18EF3122C5EA",
+      "0xZZ9693Bc6afc0C5328bA36FaF03C18EF3122C5EA",
+      "0x209693Bc6afc0C5328bA36FaF03C18EF3122C5EA00",
+    ]) {
+      expect(() => canonicalEvmDest(bad)).toThrow();
+    }
+  });
+
+  test("Solana dest is solana:<base58 address> unchanged", () => {
+    expect(canonicalSolanaDest(SOL_TO)).toBe(`solana:${SOL_TO}`);
+  });
+
+  test("Solana dest rejects malformed addresses", () => {
+    for (const bad of ["", "short", "0OIl" + "1".repeat(40), "x".repeat(45)]) {
+      expect(() => canonicalSolanaDest(bad)).toThrow();
+    }
+  });
+});
+
+describe("gateAgentSend with a pre-canonical multi-chain dest", () => {
+  const EVM_TO = "0x209693Bc6afc0C5328bA36FaF03C18EF3122C5EA";
+  const EVM_DEST = "evm:0x209693bc6afc0c5328ba36faf03c18ef3122c5ea";
+  const SOL_TO = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+  const SOL_DEST = `solana:${SOL_TO}`;
+
+  test("allowlisted EVM dest under caps is allowed (no BSV address involved)", () => {
+    const env = signEnvelope(makePayload({ dest_allowlist: [EVM_DEST] }));
+    const r = gateAgentSend({ envelope: env, dest: EVM_DEST, amount: 100, fee: 0, spentTotal: 0, origin: "test-origin" });
+    expect(r.ok).toBe(true);
+  });
+
+  test("off-allowlist EVM dest is rejected", () => {
+    const env = signEnvelope(makePayload({ dest_allowlist: [`evm:0x${"0".repeat(40)}`] }));
+    const r = gateAgentSend({ envelope: env, dest: EVM_DEST, amount: 100, fee: 0, spentTotal: 0, origin: "test-origin" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("POLICY");
+      expect(r.message).toMatch(/allowlist/i);
+    }
+  });
+
+  test("over per-tx cap is rejected in the rail's native units", () => {
+    const env = signEnvelope(makePayload({ dest_allowlist: [EVM_DEST], per_tx_cap: 50 }));
+    const r = gateAgentSend({ envelope: env, dest: EVM_DEST, amount: 51, fee: 0, spentTotal: 0, origin: "test-origin" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("POLICY");
+  });
+
+  test("over total budget via spentTotal is rejected", () => {
+    const env = signEnvelope(makePayload({ dest_allowlist: [EVM_DEST], total_budget: 1_000 }));
+    const r = gateAgentSend({ envelope: env, dest: EVM_DEST, amount: 100, fee: 0, spentTotal: 950, origin: "test-origin" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("POLICY");
+  });
+
+  test("dest_caps entry bounds a single destination", () => {
+    const env = signEnvelope(makePayload({ dest_caps: [[EVM_DEST, 60]] }));
+    expect(gateAgentSend({ envelope: env, dest: EVM_DEST, amount: 60, fee: 0, spentTotal: 0, origin: "test-origin" }).ok).toBe(true);
+    expect(gateAgentSend({ envelope: env, dest: EVM_DEST, amount: 61, fee: 0, spentTotal: 0, origin: "test-origin" }).ok).toBe(false);
+  });
+
+  test("wrong origin is rejected", () => {
+    const env = signEnvelope(makePayload({ dest_allowlist: [EVM_DEST] }));
+    const r = gateAgentSend({ envelope: env, dest: EVM_DEST, amount: 1, fee: 0, spentTotal: 0, origin: "nope" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("POLICY");
+  });
+
+  test("allowlisted Solana dest is allowed", () => {
+    const env = signEnvelope(makePayload({ dest_allowlist: [SOL_DEST] }));
+    expect(gateAgentSend({ envelope: env, dest: SOL_DEST, amount: 100, fee: 0, spentTotal: 0, origin: "test-origin" }).ok).toBe(true);
+  });
+
+  test("off-allowlist Solana dest is rejected", () => {
+    const env = signEnvelope(makePayload({ dest_allowlist: [EVM_DEST] }));
+    const r = gateAgentSend({ envelope: env, dest: SOL_DEST, amount: 100, fee: 0, spentTotal: 0, origin: "test-origin" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("POLICY");
+  });
+
+  test("tampered envelope is BAD_SIG on multi-chain dests too", () => {
+    const env = signEnvelope(makePayload({ dest_allowlist: [EVM_DEST] }));
+    env.payload.per_tx_cap = 1;
+    const r = gateAgentSend({ envelope: env, dest: EVM_DEST, amount: 1, fee: 0, spentTotal: 0, origin: "test-origin" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("BAD_SIG");
   });
 });
 

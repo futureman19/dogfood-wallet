@@ -81,3 +81,17 @@ test("MCP BSV invalid BRC181 fails before funding instead of switching assets", 
   expect(r.payments).toEqual([]);
   expect(r.rows).toEqual([]);
 });
+
+// One signed envelope gates every rail: an unreadable brc181.json blocks the
+// offered currency instead of being ignored by non-BSV pockets.
+for (const [rail, challenges] of [["base", 2], ["solana", 3]] as const) {
+  test(`MCP ${rail} invalid BRC181 fails closed without switching assets`, async () => {
+    const r = await call(rail, "brc181");
+    expect(r.isError).toBe(true);
+    expect(r.body.ok).toBe(false);
+    expect(r.body.code).toBe("BAD_SIG");
+    expect(r.events).toEqual(Array(challenges).fill("challenge"));
+    expect(r.payments).toEqual([]);
+    expect(r.rows).toEqual([]);
+  });
+}

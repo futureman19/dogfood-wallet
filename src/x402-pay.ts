@@ -53,6 +53,13 @@ export async function payX402(root: string, url: string) {
         pocket: vault.policy.evm?.usdc,
         killfileOn: vault.policy.killfileOn,
         usage: loadUsage(root, new Date(), "usdc-base"),
+        brc181SpentTotal: loadUsage(root, new Date(), "brc181-usdc-base").spentLifetime,
+        // Load the signed policy only if a USDC/Base requirement is offered.
+        get policyEnvelope() {
+          const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
+          if (!loaded.ok) throw new UsdcX402Error(loaded.code, loaded.message);
+          return loaded.envelope;
+        },
         beforeSign: guard.reserve,
         onSpend: guard.log,
       });
@@ -61,7 +68,7 @@ export async function payX402(root: string, url: string) {
       // No base/USDC requirement offered? Try the Solana pocket before failing.
       if (!(e instanceof UsdcX402Error) || e.code !== "UNSUPPORTED") throw e;
       const { deriveSolanaAddress } = await import("./solana");
-      const { settleSolanaX402 } = await import("./solana-x402");
+      const { settleSolanaX402, SolanaX402Error } = await import("./solana-x402");
       const r = await settleSolanaX402({
         url,
         key: vault.key,
@@ -70,6 +77,13 @@ export async function payX402(root: string, url: string) {
         pocket: vault.policy.solana?.usdc,
         killfileOn: vault.policy.killfileOn,
         usage: loadUsage(root, new Date(), "usdc-solana"),
+        brc181SpentTotal: loadUsage(root, new Date(), "brc181-usdc-solana").spentLifetime,
+        // Load the signed policy only if a USDC/Solana requirement is offered.
+        get policyEnvelope() {
+          const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
+          if (!loaded.ok) throw new SolanaX402Error(loaded.code, loaded.message);
+          return loaded.envelope;
+        },
         beforeSign: guard.reserve,
         onSpend: guard.log,
       });

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { PrivateKey } from "@bsv/sdk";
+import { makePayload, signEnvelope } from "./test-support/brc181";
 
 // Solana x402 (`exact` scheme) client settlement, mirroring evm-x402.ts:
 // GET -> 402 -> pick exact/solana(-devnet)/USDC -> policy gate -> build the
@@ -169,5 +170,105 @@ describe("settleSolanaX402", () => {
     }).catch((e) => e);
     expect((err as InstanceType<typeof SolanaX402Error>).code).toBe("SETTLE_FAILED");
     expect(String(err)).toContain("insufficient_funds");
+  });
+});
+
+describe("settleSolanaX402 BRC-181 envelope gate", () => {
+  const SOL_DEST = `solana:${MERCHANT}`;
+
+  test("allowlisted dest inside caps settles and logs the spend", async () => {
+    const { settleSolanaX402 } = await import("./solana-x402");
+    const { fetchFn, spent } = world();
+    const result = await settleSolanaX402({
+      url: "https://merchant.test/fortune",
+      key: keyOne(),
+      from: OUR_ADDR,
+      pocket: POCKET,
+      killfileOn: false,
+      usage: USAGE,
+      fetchFn,
+      onSpend: (row) => spent.push(row),
+      policyEnvelope: signEnvelope(makePayload({ dest_allowlist: [SOL_DEST] })),
+      origin: "test-origin",
+    });
+    expect(result.ok).toBe(true);
+    expect(spent).toHaveLength(1);
+  });
+
+  test("off-allowlist dest refuses before signing: no hold, no spend", async () => {
+    const { settleSolanaX402, SolanaX402Error } = await import("./solana-x402");
+    const { fetchFn, spent } = world();
+    let reserved = false;
+    const err = await settleSolanaX402({
+      url: "https://merchant.test/fortune",
+      key: keyOne(),
+      from: OUR_ADDR,
+      pocket: POCKET,
+      killfileOn: false,
+      usage: USAGE,
+      fetchFn,
+      beforeSign: () => { reserved = true; },
+      onSpend: (row) => spent.push(row),
+      policyEnvelope: signEnvelope(makePayload({ dest_allowlist: [`solana:${"1".repeat(44)}`] })),
+      origin: "test-origin",
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(SolanaX402Error);
+    expect((err as InstanceType<typeof SolanaX402Error>).code).toBe("POLICY");
+    expect(reserved).toBe(false);
+    expect(spent).toHaveLength(0);
+  });
+
+  test("envelope per-tx cap below the price refuses in USDC base units", async () => {
+    const { settleSolanaX402, SolanaX402Error } = await import("./solana-x402");
+    const { fetchFn } = world();
+    const err = await settleSolanaX402({
+      url: "https://merchant.test/fortune",
+      key: keyOne(),
+      from: OUR_ADDR,
+      pocket: POCKET,
+      killfileOn: false,
+      usage: USAGE,
+      fetchFn,
+      policyEnvelope: signEnvelope(makePayload({ dest_allowlist: [SOL_DEST], per_tx_cap: 999 })),
+      origin: "test-origin",
+    }).catch((e) => e);
+    expect((err as InstanceType<typeof SolanaX402Error>).code).toBe("POLICY");
+  });
+
+  test("envelope total budget is consumed by the brc181 USDC usage scope", async () => {
+    const { settleSolanaX402, SolanaX402Error } = await import("./solana-x402");
+    const { fetchFn } = world();
+    const err = await settleSolanaX402({
+      url: "https://merchant.test/fortune",
+      key: keyOne(),
+      from: OUR_ADDR,
+      pocket: POCKET,
+      killfileOn: false,
+      usage: USAGE,
+      brc181SpentTotal: 99_500,
+      fetchFn,
+      policyEnvelope: signEnvelope(makePayload({ dest_allowlist: [SOL_DEST] })),
+      origin: "test-origin",
+    }).catch((e) => e);
+    expect((err as InstanceType<typeof SolanaX402Error>).code).toBe("POLICY");
+  });
+
+  test("tampered envelope refuses with BAD_SIG", async () => {
+    const { settleSolanaX402, SolanaX402Error } = await import("./solana-x402");
+    const { fetchFn } = world();
+    const env = signEnvelope(makePayload({ dest_allowlist: [SOL_DEST] }));
+    env.payload.per_tx_cap = 1;
+    const err = await settleSolanaX402({
+      url: "https://merchant.test/fortune",
+      key: keyOne(),
+      from: OUR_ADDR,
+      pocket: POCKET,
+      killfileOn: false,
+      usage: USAGE,
+      fetchFn,
+      policyEnvelope: env,
+      origin: "test-origin",
+    }).catch((e) => e);
+    expect((err as InstanceType<typeof SolanaX402Error>).code).toBe("BAD_SIG");
   });
 });

@@ -2,6 +2,7 @@ import type { PaymentIntent } from "./payment-guard";
 import type { PrivateKey } from "@bsv/sdk";
 import { buildX402PaymentHeader, USDC_BASE, USDC_BASE_SEPOLIA, type X402ExactRequirement } from "./evm";
 import { evaluateEvmSend, type EvmAssetPolicy, type Usage } from "./policy";
+import { canonicalEvmDest, gateAgentSend, type PolicyEnvelope } from "./brc181";
 
 // Coinbase x402 (`exact` scheme, EIP-3009) settlement for the EVM pocket.
 // Flow: GET resource -> 402 with JSON body -> pick the exact/base/USDC
@@ -65,6 +66,11 @@ export async function settleUsdcX402(opts: {
   beforeSign?: (intent: PaymentIntent) => void;
   onSpend?: (row: Record<string, unknown>) => void;
   now?: number;
+  /** Signed BRC-181 policy envelope. When present it ANDs with policy.json. */
+  policyEnvelope?: PolicyEnvelope | null;
+  /** Lifetime spend inside the envelope's own brc181-usdc-base scope. */
+  brc181SpentTotal?: number;
+  origin?: string;
 }): Promise<UsdcSettleResult> {
   const fetchFn = opts.fetchFn ?? fetch;
 
@@ -84,6 +90,25 @@ export async function settleUsdcX402(opts: {
   const amount = Number(req.maxAmountRequired);
   const decision = evaluateEvmSend(opts.pocket, opts.killfileOn, amount, req.payTo, opts.usage);
   if (!decision.ok) throw new UsdcX402Error(decision.code, decision.message);
+
+  // A signed BRC-181 envelope gates this rail too. Its numeric fields are read
+  // in the rail's native units (USDC base units here); the facilitator pays
+  // gas, so the client-side fee is 0.
+  let dest: string;
+  try {
+    dest = canonicalEvmDest(req.payTo);
+  } catch {
+    throw new UsdcX402Error("BAD_ADDRESS", "REJECTED: USDC payee is not a valid EVM address.");
+  }
+  const gate = gateAgentSend({
+    envelope: opts.policyEnvelope,
+    dest,
+    amount,
+    fee: 0,
+    spentTotal: opts.brc181SpentTotal ?? opts.usage.spentLifetime,
+    origin: opts.origin,
+  });
+  if (!gate.ok) throw new UsdcX402Error(gate.code, gate.message);
 
   opts.beforeSign?.({ asset: "usdc-base", amount, to: req.payTo });
   const header = await buildX402PaymentHeader({ key: opts.key, requirement: req, from: opts.from, now: opts.now });
