@@ -46,9 +46,9 @@ export function inspectPaymentHold(root: string) {
       pending = "invalid";
       const row = JSON.parse(readFileSync(join(root, "payment.pending.json"), "utf8"));
       if (row?.version === 1 && typeof row.id === "string" && /^[0-9a-f-]{36}$/.test(row.id)
-        && ["send", "agent-buy", "x402-pay", "x402-delegate", "split", "allowance-fund", "bridge-order", "bridge-funded"].includes(row.operation) && typeof row.started === "string" && Number.isFinite(Date.parse(row.started))
+        && ["send", "agent-buy", "agent-list", "agent-cancel-listing", "x402-pay", "x402-delegate", "split", "allowance-fund", "bridge-order", "bridge-funded"].includes(row.operation) && typeof row.started === "string" && Number.isFinite(Date.parse(row.started))
         && ["bsv", "usdc-base", "usdc-solana"].includes(row.asset) && Number.isSafeInteger(row.amount)
-        && (row.operation === "split"
+        && (["split", "agent-list", "agent-cancel-listing"].includes(row.operation)
           ? row.asset === "bsv" && row.amount === 0 && Number.isSafeInteger(row.fee) && row.fee >= 0
           : row.amount > 0)
         && typeof row.to === "string" && /^[a-zA-Z0-9]{20,100}$/.test(row.to)
@@ -91,6 +91,7 @@ export async function withBridgeReconciliation<T>(root: string, intentId: string
   }
 }
 
+export type PaymentOperation = "send" | "agent-buy" | "agent-list" | "agent-cancel-listing" | "x402-pay" | "x402-delegate" | "split" | "allowance-fund" | "bridge-order" | "bridge-funded" | "bridge-reconcile-check";
 export type PaymentIntent = { asset: string; amount: number; to: string; fee?: number };
 export type PaymentGuard = {
   readonly id: string;
@@ -102,7 +103,7 @@ export type PaymentGuard = {
 /** Cooperative local-filesystem exclusion, acquired before policy/usage reads.
  * Any abandoned lock, even empty/corrupt, blocks forever. No PID/time recovery.
  */
-export async function withPaymentGuard<T>(root: string, operation: string, run: (guard: PaymentGuard) => Promise<T>): Promise<T> {
+export async function withPaymentGuard<T>(root: string, operation: PaymentOperation, run: (guard: PaymentGuard) => Promise<T>): Promise<T> {
   const lock = join(root, "payment.lock");
   const pending = join(root, "payment.pending.json");
   if (present(pending) || present(join(root, "payment.bridge-parked.json"))) throw new PaymentHeldError();

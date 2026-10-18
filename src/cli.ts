@@ -27,6 +27,8 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts send <to-address> <sats> [--max-fee <sats>] [--] [note]
   bun src/cli.ts agent-call <agent.action> <POST|PUT|DELETE> <path> '<body-json>'
   bun src/cli.ts agent-buy <listing-outpoint> <max-price-sats> [--no-broadcast]
+  bun src/cli.ts agent-list <ordinal-outpoint> <price-sats> [--no-broadcast]
+  bun src/cli.ts agent-cancel-listing <listing-outpoint> [--no-broadcast]
   bun src/cli.ts fund-request <sats>
   bun src/cli.ts kill
   bun src/cli.ts sweep <p2pkh-address>
@@ -61,6 +63,8 @@ Use -- before literal note tokens beginning with -. No preview or automatic retr
 The LLM never sees the key. Policy lives in the signer.
 agent-call is human-only: prints an offline signed Gryd envelope; never sends it.
 agent-buy is human-only: purchases on chain by default; --no-broadcast is an unsigned preview.
+agent-list and agent-cancel-listing are human-only: broadcast by default; unsigned --no-broadcast preview.
+Phase 3 backend compatibility is pending; do not use live until the Gryd verifier is updated.
 allow, sweep, split, fund-request, allowance-*, policy-inspect, and policy-issue are human-only (not MCP tools).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
@@ -104,6 +108,21 @@ async function main() {
       console.log(`Vault: ${root}`);
       console.log("Fund this address. Do not print or copy the key.");
       console.log("Allowlist is empty. Human next: bun src/cli.ts allow <p2pkh-address>");
+      break;
+    }
+    case "agent-list": {
+      if (!a || !b || !/^[0-9]+$/.test(b) || !Number.isSafeInteger(Number(b)) || Number(b) <= 0
+        || rest.length > 1 || (rest.length === 1 && rest[0] !== "--no-broadcast")) {
+        die("Usage: agent-list <ordinal-outpoint> <price-sats> [--no-broadcast]; positive decimal integer sats only");
+      }
+      const { listAgent } = await import("./gryd-listings");
+      console.log(JSON.stringify(await listAgent({ root, ordinalOutpoint: a, priceSats: Number(b), noBroadcast: rest[0] === "--no-broadcast" }), null, 2));
+      break;
+    }
+    case "agent-cancel-listing": {
+      if (!a || rest.length || (b !== undefined && b !== "--no-broadcast")) die("Usage: agent-cancel-listing <listing-outpoint> [--no-broadcast]");
+      const { cancelAgentListing } = await import("./gryd-listings");
+      console.log(JSON.stringify(await cancelAgentListing({ root, listingOutpoint: a, noBroadcast: b === "--no-broadcast" }), null, 2));
       break;
     }
     case "agent-buy": {

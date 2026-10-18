@@ -244,6 +244,85 @@ limitations from the shared payment guard still apply. Do not edit policy or run
 unguarded spenders concurrently. Live-fire and backend acceptance are separate
 human-supervised review gates.
 
+## Gryd listing and cancellation (Phase 3: human-only, backend pending)
+
+```bash
+# Use only a disposable unfunded vault for rehearsals.
+bun src/cli.ts agent-list <ordinal-outpoint> <price-sats> --no-broadcast
+bun src/cli.ts agent-cancel-listing <listing-outpoint> --no-broadcast
+```
+
+**Without `--no-broadcast`, both commands sign and broadcast on mainnet.**
+They are deliberately owner CLI operations, not MCP tools. Do not use them live
+until backend compatibility is fixed and separately verified. This is a wallet
+implementation, **not a working end-to-end Gryd listing integration**.
+
+**Known backend blocker:** Gryd's `listing_verifier.ex` currently constructs its
+expected covenant with the same seller hash for cancellation and payout (lines
+142–147); `completion_verifier.ex` also checks the seller payout. This wallet
+intentionally uses the **property identity for cancellation and the MAIN vault
+address for proceeds**. Those are different hashes. The existing backend cannot
+accept this requested shape until its verification contract is updated. No Gryd
+code is changed here. Results explicitly carry `backendCompatible: false`; this
+is not dynamically negotiated. A successful ARC acknowledgement is neither
+backend acceptance nor mining confirmation. The cancellation envelope does not
+contain a cancellation txid because the exact current web API body is `{}`.
+
+Listing requires an exact one-sat P2PKH output owned by
+`dogfood/gryd/property/v1`. Source bytes must hash to the requested txid; vout,
+value, script and script-hash unspent evidence must agree. Inscription wrappers
+and other scripts are not accepted. Input 0 is property-key signed; output 0 is
+one sat in the byte-exact pinned legacy OrdLock, with property cancellation hash
+and requested positive safe-integer price payable to the main vault P2PKH.
+Cancellation accepts only that exact covenant with both self-controlled hashes,
+signs its cancellation branch with the property key, and returns output 0 to the
+property address. Every signed input is validated locally using SDK `Spend`.
+
+Only main-address coins greater than one sat fund fees, smallest-first. Their
+raw source transactions, values and scripts are verified, with fresh unspent
+triples immediately before signing. Change returns to main. `STOP_SPENDING`
+refuses both operations. These self-controlled owner operations do not use local
+allowlists, BRC-181 destination gates or `gryd` purchase budgets; only miner fees
+leave the wallet. Successful accounting records `amount: 0` and the actual fee,
+so no purchase amount budget is consumed. Other rails retain their own gates.
+
+**Route identity is metadata, never spending authority.** The public marketplace
+index only exposes open listings, while `/agents/mine` requires a signed POST.
+To avoid inventing a public inventory endpoint, Phase 3 resolves output-zero
+holdings from existing private `gryd-purchases/<txid>.json` evidence, or prior
+Phase 3 cancellation/listing evidence under `gryd-listings/`. It checks the stored
+transaction hash and unique agent ID, then confirms that ID using read-only
+`GET /api/v1/agents/<encoded-id>`. Prices and ownership never come from this
+metadata. Imported holdings, missing/corrupt/ambiguous evidence, nonzero vouts
+without route provenance, or unavailable agent profiles fail closed. Back up
+this evidence along with the vault; there is no guessed route or automatic
+lineage scan. Thus a plain property UTXO without Dogfood provenance is not yet a
+supported listing input even if it is cryptographically owned.
+
+Preview holds the shared exclusive payment lock temporarily but does not reserve,
+sign, emit spendable bytes/envelopes, write recovery evidence or log a spend.
+Normal execution reserves a durable zero-amount fee-bearing hold before signing,
+then exclusively creates `gryd-listings/<txid>.json` with mode `0600` and fsync
+**before** `defaultBroadcast`. Evidence includes signed bytes, source outpoint,
+input/output amounts, operation, route ID, payment ID and public property identity;
+never private keys. Existing evidence is never overwritten. Protect these files
+as spendable authorizations. Filesystem ACLs and Windows directory-fsync/power-loss
+limitations still apply. An ambiguous broadcast, txid mismatch or persistence
+failure retains the hold, with no automatic retry or recovery/clearing command.
+The existing ARC transport's explicit fee-policy fallback remains unchanged.
+
+After acknowledged broadcast the CLI prints a property-key signed envelope:
+
+- `agent.list`, `POST /api/v1/agents/<id>/list`, body
+  `{ price_sats, listing_type: "sale", outpoint: "<listTxid>_0", list_txid }`.
+- `agent.cancel_listing`, `POST /api/v1/agents/<id>/listing/cancel`, body `{}`.
+
+The ID is URL-encoded exactly. These envelopes are **never POSTed** by Dogfood;
+they are usable short-lived authorizations, not receipts. No live broadcast or
+backend mutation is performed by tests. The real QA chain fixture validates
+listing-script byte identity; disposable synthetic list/cancel transactions
+validate all inputs and intercepted transport/evidence ordering separately.
+
 ## Direct-send fee ceiling
 
 `send <to-address> <sats> --max-fee <fee-sats> [note]` optionally bounds the

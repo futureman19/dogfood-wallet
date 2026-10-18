@@ -73,14 +73,14 @@ async function get(url: string, fetchFn: typeof fetch) {
   if (!response.ok) throw new Error(`Read-only chain/market lookup failed: HTTP ${response.status}`);
   return response;
 }
-async function sourceTransaction(txid: string, fetchFn: typeof fetch): Promise<Transaction> {
+export async function sourceTransaction(txid: string, fetchFn: typeof fetch): Promise<Transaction> {
   const hex = (await (await get(`${WOC}/tx/${txid}/hex`, fetchFn)).text()).trim();
   if (!/^(?:[a-fA-F0-9]{2})+$/.test(hex)) throw new Error("Invalid source transaction encoding");
   const tx = Transaction.fromHex(hex);
   if (tx.toHex() !== hex.toLowerCase() || tx.id("hex") !== txid) throw new Error("Source transaction hash/bytes mismatch");
   return tx;
 }
-async function unspent(url: string, fetchFn: typeof fetch): Promise<Utxo[]> {
+export async function unspent(url: string, fetchFn: typeof fetch): Promise<Utxo[]> {
   const rows: unknown = await (await get(url, fetchFn)).json();
   if (!Array.isArray(rows)) throw new Error("Invalid unspent response");
   const seen = new Set<string>();
