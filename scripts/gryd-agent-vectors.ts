@@ -12,10 +12,10 @@ const protocol = await import(pathToFileURL(resolve(root, sourcePath)).href);
 // Public synthetic scalar 1, never a vault identity.
 const key = PrivateKey.fromHex("1".padStart(64, "0"));
 const inputs = [
-  { action: "agent.mine", method: "POST", path: "/api/v1/agents/mine", body: {} },
-  { action: "agent.update", method: "PUT", path: "/api/v1/agents/a%2Fb", body: { z: null, name: "Café 🌍\n\"hi\"", nested: { z: [true, false, null, -0, 1e-7], a: { "10": 10, "2": 2 } } } },
-  { action: "agent.action.dry_run", method: "POST", path: "/api/v1/agents/a/actions/dry-run", body: { requestId: "fixture", action: "area.sense", target: { lng: -122.4, lat: 37.7, radiusM: 100 }, params: {} } },
-  { action: "agent.schedule.delete", method: "DELETE", path: "/api/v1/agents/a/schedules/s", body: {}, network: "testnet" },
+  { action: "agent.mine", method: "POST", path: "/api/v1/agents/mine", body: {}, network: "mainnet", audience: "the-grid-api.fly.dev" },
+  { action: "agent.update", method: "PUT", path: "/api/v1/agents/a%2Fb", body: { z: null, name: "Café 🌍\n\"hi\"", nested: { z: [true, false, null, -0, 1e-7], a: { "10": 10, "2": 2 } } }, network: "mainnet", audience: "the-grid-api.fly.dev" },
+  { action: "agent.action.dry_run", method: "POST", path: "/api/v1/agents/a/actions/dry-run", body: { requestId: "fixture", action: "area.sense", target: { lng: -122.4, lat: 37.7, radiusM: 100 }, params: {} }, network: "mainnet", audience: "the-grid-api.fly.dev" },
+  { action: "agent.schedule.delete", method: "DELETE", path: "/api/v1/agents/a/schedules/s", body: {}, network: "testnet", audience: "locus-api.test" },
 ];
 const vectors = inputs.map(input => {
   const payload = { mode: "signed_write", ...input, timestamp: 1700000000, nonce: "00000000-0000-4000-8000-000000000001" };

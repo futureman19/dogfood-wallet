@@ -27,7 +27,7 @@ describe("Gryd signed-write interoperability", () => {
     expect(validSignature({ ...result, payload: { ...payload, body: { changed: true } } })).toBe(false);
     expect(validSignature({ ...result, payload: { ...payload, method: payload.method === "PUT" ? "POST" : "PUT" } })).toBe(false);
   });
-  test("fresh UUIDs, seconds timestamp, omitted network, detached body", () => {
+  test("fresh UUIDs, seconds timestamp, mainnet scope bound, detached body", () => {
     const body = { nested: { value: 1 } };
     const before = Math.floor(Date.now() / 1000);
     const a = signAgentRequest("agent.mine", body, request, key);
@@ -36,7 +36,9 @@ describe("Gryd signed-write interoperability", () => {
     expect(a.payload.nonce).not.toBe(b.payload.nonce);
     expect(a.payload.timestamp).toBeGreaterThanOrEqual(before);
     expect(a.payload.timestamp).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
-    expect(Object.hasOwn(a.payload, "network")).toBe(false);
+    // The deployed backend rejects envelopes without network/audience (401) — always bound.
+    expect(a.payload.network).toBe("mainnet");
+    expect(a.payload.audience).toBe("the-grid-api.fly.dev");
     body.nested.value = 2;
     expect(a.payload.body).toEqual({ nested: { value: 1 } });
     expect(validSignature(JSON.parse(JSON.stringify(a)))).toBe(true);

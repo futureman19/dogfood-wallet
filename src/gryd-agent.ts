@@ -7,7 +7,7 @@ import { loadVault } from "./vault";
 export const AGENT_WRITE_ACTIONS = [
   "agent.create", "agent.update", "agent.fund", "agent.withdraw", "agent.authorize",
   "agent.mine", "agent.transactions", "agent.conversation", "agent.runs",
-  "agent.invoke", "agent.invoke_agent", "agent.brain.read", "agent.brain.update",
+  "agent.invoke", "agent.approach", "agent.invoke_agent", "agent.brain.read", "agent.brain.update",
   "agent.list", "agent.cancel_listing", "agent.buy", "agent.lock", "agent.unlock",
   "agent.capabilities.read", "agent.capability.grant", "agent.capability.revoke",
   "agent.action.dry_run", "agent.action.execute", "agent.actions.read",
@@ -22,7 +22,10 @@ export interface SignedWriteEnvelope<A extends SignedWriteAction | "object.mint"
   body: Record<string, unknown>;
   timestamp: number;
   nonce: string;
-  network?: "mainnet" | "testnet";
+  /** Required by the deployed backend since the split-identity release — missing is NOT mainnet. */
+  network: "mainnet" | "testnet";
+  /** Required: API deployment host this envelope is intended for (prod = the-grid-api.fly.dev). */
+  audience: string;
 }
 export interface SignedAgentRequest<A extends SignedWriteAction | "object.mint" = SignedWriteAction> {
   payload: SignedWriteEnvelope<A>;
@@ -31,7 +34,9 @@ export interface SignedAgentRequest<A extends SignedWriteAction | "object.mint" 
   address: string;
 }
 type RequestBinding = Pick<SignedWriteEnvelope, "method" | "path">;
-type EnvelopeOptions = Partial<Pick<SignedWriteEnvelope, "timestamp" | "nonce" | "network">>;
+type EnvelopeOptions = Partial<Pick<SignedWriteEnvelope, "timestamp" | "nonce" | "network" | "audience">>;
+/** The vault is mainnet-only and talks to the prod Gryd API; both are bound into every signature. */
+export const GRYD_ENVELOPE_SCOPE = { network: "mainnet", audience: "the-grid-api.fly.dev" } as const;
 
 // Serialize directly: JSON.stringify on a reconstructed sorted object re-orders
 // integer-looking keys. Refuse non-JSON data that changes during transport.
@@ -78,8 +83,9 @@ function buildEnvelope(action: SignedWriteAction, body: Record<string, unknown>,
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) throw new Error("Timestamp must be nonnegative integer seconds");
   if (typeof nonce !== "string" || !nonce.trim()) throw new Error("Nonce must be a nonempty string");
   if (options.network !== undefined && options.network !== "mainnet" && options.network !== "testnet") throw new Error("Network must be mainnet or testnet");
-  const payload: SignedWriteEnvelope = { mode: "signed_write", method: request.method, path: request.path, action, body: JSON.parse(canonicalJson(body)), timestamp, nonce };
-  if (options.network !== undefined) payload.network = options.network;
+  const audience = options.audience ?? GRYD_ENVELOPE_SCOPE.audience;
+  if (typeof audience !== "string" || !audience.trim() || /[\s/]/.test(audience)) throw new Error("Audience must be a bare deployment host");
+  const payload: SignedWriteEnvelope = { mode: "signed_write", method: request.method, path: request.path, action, body: JSON.parse(canonicalJson(body)), timestamp, nonce, network: options.network ?? GRYD_ENVELOPE_SCOPE.network, audience };
   return payload;
 }
 
