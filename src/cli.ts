@@ -25,6 +25,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts payment-inspect
   bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [--max-fee <sats>] [--] [note]
+  bun src/cli.ts agent-post <agent.action> '<body-json: {route,body}>' [--no-post]
   bun src/cli.ts agent-call <agent.action> <POST|PUT|DELETE> <path> '<body-json>'
   bun src/cli.ts agent-buy <listing-outpoint> <max-price-sats> [--no-broadcast]
   bun src/cli.ts agent-mint <name> <lat> <lng> [--no-broadcast]
@@ -153,6 +154,14 @@ async function main() {
       const { buyAgent } = await import("./gryd-buy");
       const result = await buyAgent({ root, listingOutpoint: a, maxPriceSats: Number(b), noBroadcast: rest[0] === "--no-broadcast" });
       console.log(JSON.stringify(result, null, 2));
+      break;
+    }
+    case "agent-post": {
+      if (!a || !b || rest.length > 1 || rest.length === 1 && rest[0] !== "--no-post") die("Usage: agent-post <agent.action> '<body-json: {route,body}>' [--no-post]");
+      const {postAgent} = await import("./gryd-post");
+      let input: unknown;
+      try { input = JSON.parse(b); } catch { die("Body must be valid JSON"); }
+      console.log(JSON.stringify(await postAgent({root, action:a, input, noPost:rest[0] === "--no-post"}), null, 2));
       break;
     }
     case "agent-call": {

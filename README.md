@@ -77,7 +77,8 @@ supported with an arbitrary JSON object body. Unknown/non-agent actions are
 rejected. Supply the exact encoded route path and uppercase method: these are
 signed, never normalized. Bodies must be plain JSON (no undefined, non-finite
 numbers, custom objects or cycles). A fresh UUID and Unix-seconds timestamp are
-generated per call; the network field is omitted as in the web client.
+generated per call; mainnet network and audience `the-grid-api.fly.dev` are
+bound into every envelope (current contract synchronized in `ad5ad6f`).
 
 The signature is compact base64 Bitcoin Signed Message using the vault identity
 key, over `Locus Signed Write\n` plus recursively key-sorted JSON. Keys never
@@ -97,10 +98,10 @@ on the pure helper support deterministic testing; the CLI offers no overrides.
 
 Frozen canonicalization vectors were executed from
 `packages/locus-protocol/src/signed-write.ts` in Gryd checkout
-`211194c3ab177cefb2b359e27a5ceeaad4c012bf`; the fixture records its source SHA-256.
+current `open-world` checkout (see Phase 5 source provenance); the fixture records its source SHA-256.
 They cover nested key sorting (including numeric-looking keys), arrays, Unicode,
-escaping, numeric formatting, encoded paths, all three methods, and optional
-network. Signatures use public synthetic scalar 1, **not a vault key**.
+escaping, numeric formatting, encoded paths, all three methods, and required
+network/audience scope. Signatures use public synthetic scalar 1, **not a vault key**.
 Regenerate deliberately with `bun scripts/gryd-agent-vectors.ts <grid-repo-root>`;
 review source hash/action-list changes rather than blindly accepting drift.
 Neither tests nor the packaged CLI require a Gryd checkout.
@@ -452,6 +453,168 @@ inscription parser. It signs the **whole original source script**, never an
 arbitrarily stripped suffix; every completed listing input is Spend-validated.
 Missing/ambiguous provenance or unsupported wrappers fail closed. All protocol
 vectors and prior agent-call behavior remain covered by the full test suite.
+
+## Gryd signed sender (Phase 5: human-only)
+
+```bash
+# Explicitly select a disposable UNFUNDED vault for rehearsals.
+bun src/cli.ts agent-post agent.update '{"route":{"agentId":"object:7","signer":"property"},"body":{"name":"Scout"}}' --no-post
+```
+
+`agent-post <agent.action> '<body-json>' [--no-post]` is a **human CLI**, not
+MCP. Without `--no-post` it submits a usable signed authorization to production.
+`agent-call` remains offline, print-only and unchanged. There is no arbitrary
+URL, method, path, network, audience, nonce or timestamp override. The JSON
+argument must be exactly `{ "route": {...}, "body": {...} }`: **only `body`
+becomes `payload.body`**. Route metadata is locally validated, never leaked into
+the signed body. Unknown fields/flags, unsafe identifiers and invalid financial
+amounts are rejected before signing. An action can spend remotely even though it
+is not a local transaction; human invocation is the authorization boundary.
+
+`route.agentId` is required except for create/mine. `route.targetId`, `grantId`
+and `scheduleId` are required only for their routes below; irrelevant metadata
+is rejected. IDs are unencoded ASCII `[A-Za-z0-9][A-Za-z0-9:_-]{0,199}`; no slash,
+percent, dot segments, query or fragment. Fetch URLs encode each ID. Current web
+`signedRequestPath` **decodes the path before signing** (e.g. fetch `object%3A7`,
+sign `object:7`) to match Cowboy. This sender follows that current contract;
+existing offline canonical vectors still test exact caller-provided bindings.
+
+`route.signer` is `main` (default) or `property`. Property means the existing
+`dogfood/gryd/property/v1` derivation, not a new vault or funding pool. Use it for
+property-held agents and chain listing/close-out envelopes. **Backend owner
+identity fields are compressed public keys**, despite names such as
+`ownerAddress`/`owner_address`; `VerifySignedWrite` assigns the verified public
+key. Optional `body.owner_address`, when supplied, must equal the selected
+signer's public key. Withdrawal converts that identity to its base58 P2PKH
+address in `sponsored_broadcast.js`. It does not pay an arbitrary supplied
+address. A metadata row previously registered with a base58 owner instead of
+that public key is **not interchangeable**: fund/withdraw preflight refuses it;
+other owner routes can be rejected by the backend. This sender does not migrate
+ownership or fix Phase 4 records. Selecting the property signer cannot bypass
+that backend ownership check.
+
+### Current routing and acceptance matrix
+
+Source inspected read-only: `the-grid-open-world-wallet-fix` at `1619718`
+(`open-world`), web `api/agent.ts`, `agentMarket.ts`, `agentWorldActions.ts`,
+`client.ts`, `signedRequestPath.ts`; backend router, corresponding controllers,
+`AgentWallet`, `DepositVerifier`, signature verifier and sponsored payout script.
+The older `the-grid-open-world` dev checkout at `211194c` is stale. `ad5ad6f`
+already synchronized network/audience and `agent.approach`; no protocol rollback
+was made. Every envelope binds **mainnet + the-grid-api.fly.dev**. Protocol
+vectors regenerate without a diff from the current read-only checkout.
+
+Paths below are relative to `/api/v1/agents`; `:id` is `route.agentId`.
+Bodies are exact wire fields, not arbitrary server parameters. `?` means optional.
+All requests use POST **except the two PUTs shown**. The current schedule-delete
+contract uses POST `.../delete`, **not DELETE**; no current agent route requires
+DELETE. The offline signer retains DELETE canonicalization support.
+
+| Action | Method/path | Body fields | Readback/result |
+|---|---|---|---|
+| `agent.create` | POST empty suffix | `name,lat,lng`; `type,owner_address,model,skills,greeting,background,spending_policy,triggerRadiusM,triggerWord?` | Returned ID then public profile, owner + every submitted field |
+| `agent.update` | **PUT** `/:id` | `name,owner_address,triggerRadiusM,triggerWord,model,skills,greeting,background,status,spending_policy?` | Public profile, owner + every submitted field |
+| `agent.fund` | POST `/:id/fund` | **`txid,vout` only** | Chain output + credited amount + public balance delta |
+| `agent.withdraw` | POST `/:id/withdraw` | **`amount`; `owner_address?`** | Fresh bound chain payout + public balance delta |
+| `agent.authorize` | POST `/:id/authorize` | `spending_policy`; `owner_address?` | Public profile policy comparison |
+| `agent.mine` | POST `/mine` | `owner_address?` | Signed read; no public equivalent |
+| `agent.transactions` | POST `/:id/transactions` | `limit?` | Owner-gated; no public equivalent |
+| `agent.conversation` | POST `/:id/conversation` | `{}` | Owner conversation; no public equivalent |
+| `agent.runs` | POST `/:id/runs` | `limit?` | Owner runs; no public equivalent |
+| `agent.invoke` | POST `/:id/invoke` | `prompt`; `conversation_id?` | No public invocation readback |
+| `agent.approach` | POST `/:id/approach` | `lat,lng` | No public trigger readback |
+| `agent.invoke_agent` | POST `/:id/to/:targetId/invoke` | `prompt` | `route.targetId`; no public invocation readback |
+| `agent.brain.read` | POST `/:id/brain/full` | `{}` | Public summary is not full-content readback |
+| `agent.brain.update` | **PUT** `/:id/brain` | `domain,frameworks,guidelines,principles?` | Returned content compared to request, public summary hash/version compared to acknowledgement |
+| `agent.list` | POST `/:id/list` | `price_sats,listing_type:"sale",outpoint,list_txid` | Exact acknowledged open listing vs public listing |
+| `agent.cancel_listing` | POST `/:id/listing/cancel` | `cancel_txid` | Public open listing must be null, still unverified historical outcome |
+| `agent.buy` | POST `/:id/listing/close` | `close_txid` | Public open listing must be null, still unverified historical outcome |
+| `agent.capabilities.read` | POST `/:id/capabilities/list` | `{}` | Signed read, no public equivalent |
+| `agent.capability.grant` | POST `/:id/capabilities` | `capability,scope,limits,expiresAt` | No public readback |
+| `agent.capability.revoke` | POST `/:id/capabilities/:grantId/revoke` | `{}` | `route.grantId`; no public readback |
+| `agent.action.dry_run` | POST `/:id/actions/dry-run` | `requestId,action,target,params` | No public readback |
+| `agent.action.execute` | POST `/:id/actions` | `requestId,action,target,params` | No public readback |
+| `agent.actions.read` | POST `/:id/actions/list` | `{}` | Signed read, no public equivalent |
+| `agent.schedule.create` | POST `/:id/schedules` | `capability,target,params,cadence`; `hourUtc?` | Response fields checked; list is signed POST, not public GET |
+| `agent.schedule.list` | POST `/:id/schedules/list` | `{}` | Signed read, no public equivalent |
+| `agent.schedule.update` | POST `/:id/schedules/:scheduleId` | `enabled` | `route.scheduleId`; response ID/state checked; no public readback |
+| `agent.schedule.delete` | POST `/:id/schedules/:scheduleId/delete` | `{}` | `route.scheduleId`; response ID checked; no public readback |
+| `agent.lock`, `agent.unlock` | **Unsupported, fail closed** | Web uses `amount_sats,txid?` at POST `/:id/lock` or `/:id/unlock` | Separate economic verification not implemented; never zero-amount bypass |
+
+Capability/action/schedule execution is deliberately limited to the current
+read actions `world.read_area`, `world.read_history`, `area.summarize`.
+`area.sense` in old byte vectors is not a current executable capability. Target
+is `{type:"area",lat,lng,radiusM}`; grant scope is
+`{type:"radius",center:{lat,lng},radiusM}`, limits are
+`{maxPerHour,maxPerDay}`, with explicit parseable date expiry. Radius is 1–5000 integer
+meters and quota 1–10000. Cadence is hourly or daily; daily requires hourUtc 0–23,
+hourly forbids it. Caller supplies requestId/params exactly, no implicit replay
+or request-ID regeneration. Executor writes (including pin annotations), service
+listings, nonzero listing vouts, lock/unlock, external pin/ordinal market,
+ghost/sponsorship/heartbeat namespaces are unsupported. Readbacks can fail
+closed when the backend normalizes or omits a submitted field (e.g. triggerWord);
+that is not silently reported verified.
+
+### Exact financial boundary (not a deposit broadcaster)
+
+Current web `fundAgent` signs **`{ txid: deposit.txid, vout: deposit.vout }`**.
+The backend `DepositVerifier` derives the value at that outpoint, requires payment
+to treasury **`18Jc1Rq5Aw54UpCNLNvwoTLN4Uv5reTjCa`**, and a nulldata JSON binding
+`{"type":"agent_fund","agent_id":"<exact agent ID>"}`. Dogfood fetches raw WoC
+bytes, recomputes txid, checks exact P2PKH destination, positive safe-integer
+output value and that binding **before key access**. It does not create or
+broadcast the deposit. A client `amount` or destination field is rejected.
+Backend duplicate-outpoint protection remains authoritative; funding is a
+claim of a prior payment, not proof the locally selected vault funded it.
+
+Current web `withdrawAgent` signs **`{ amount, owner_address: ownerAddress }`**
+(the optional owner field is omitted when absent). Backend `AgentWallet.withdraw`
+uses the verified signer identity, checks ownership/balance, broadcasts treasury
+payout first and debits its ledger second. Dogfood gates and reserves the actual
+positive integer `amount` to the selected key's P2PKH destination. It checks the
+returned payout txid against raw bytes, matching output amount and current
+`{p:"locus",v:3,op:"agent_payout",agent_id,to,amount,ts}` receipt with timestamp
+not older than the signed request, then compares the public balance delta.
+Concurrent agent spending or server clock skew can therefore fail closed.
+
+Both financial operations enforce ordinary local per-tx/day/lifetime caps and
+allowlist, **plus installed BRC-181 destination/budget restrictions**, with actual
+amount, not zero. `policy.gryd` is not an exemption here. No local miner fee is
+created by submitting a deposit claim; withdrawal fees are treasury-sponsored,
+so this authorization records fee zero. Successful financial authorizations are
+conservatively charged once in BSV usage even if the earlier deposit was already
+charged locally or the withdrawal is inbound. This is a budget on remote financial
+authority, not net wallet cash flow. Index/API checks are not SPV or independent
+proof of custodial backend correctness.
+
+### Durable intent and uncertainty
+
+Every new authorized attempt gets a fresh UUID. Shared guard reservation precedes
+signing. After the final kill check, exclusive mode-0600 fsynced
+`gryd-posts/<nonce>.intent.json` containing the exact envelope, route, selected
+public identity, real amount and baseline is written **before HTTP or printing**.
+Response/readback/payout/verified/unverified/failure stages are also exclusive,
+fsynced files. Evidence contains usable signed authorizations; protect vault ACLs.
+Windows file mode bits and directory-fsync/power-loss limits remain as documented
+for the shared guard. A failure to persist intent never reaches HTTP.
+
+Production host is fixed; redirects are errors; every fetch has a **30-second
+AbortSignal timeout**, including body reads. There is no automatic retry, redirect
+follow, outcome reconciliation or hold clearing. Rejection, malformed response,
+readback mismatch, transport/persistence failure or process death retains the
+shared hold. **`--no-post` also retains a shared hold** because its printed
+envelope can be submitted externally; it is not an unsigned preview. Fund
+no-post still performs chain reads; other no-post operations do not send HTTP.
+
+Only matching separately fetched public state plus durable accounting releases the
+hold. Accepted operations without an adequate public readback explicitly return
+`status:"unverified", held:true` and write an unverified stage; signed schedule
+list is not misrepresented as public GET. Cancellation/close null-listing reads
+cannot establish historical settlement, so those remain held. Missing fields
+are never treated as verification. Stop spenders, preserve evidence and reconcile
+manually; do not delete a hold merely to retry. Tests use disposable unfunded
+vaults, intercepted mutations and isolated MCP discovery; **no live sends,
+withdrawals, deposits or backend acceptance are claimed**.
 
 ## Direct-send fee ceiling
 

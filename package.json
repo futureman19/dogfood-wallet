@@ -68,6 +68,7 @@
     "src/gryd-buy.ts",
     "src/gryd-listings.ts",
     "src/gryd-mint.ts",
+    "src/gryd-post.ts",
     "src/gryd-ordlock-constants.ts",
     "src/http.ts",
     "src/mcp.ts",
