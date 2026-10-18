@@ -1,7 +1,29 @@
 export const DEFAULT_MAX_SATS = 10_000;
 export const DEFAULT_MAX_SATS_PER_DAY = 50_000;
 
+export type GrydPolicy = { maxPerTxSats: number; maxPerDaySats: number };
+
+/** Missing means legacy gates; present but malformed never enables an exemption. */
+export function parseGrydPolicy(raw: unknown): GrydPolicy | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("Invalid gryd policy block");
+  const value = raw as Record<string, unknown>;
+  for (const name of ["maxPerTxSats", "maxPerDaySats"]) {
+    if (typeof value[name] !== "number" || !Number.isSafeInteger(value[name]) || value[name] < 0) throw new Error(`Invalid gryd.${name}: nonnegative safe integer required`);
+  }
+  return { maxPerTxSats: value.maxPerTxSats as number, maxPerDaySats: value.maxPerDaySats as number };
+}
+
+export function evaluateGrydBuy(policy: GrydPolicy, killfileOn: boolean, amount: number, spentToday: number): Decision {
+  if (killfileOn) return { ok: false, code: "KILL", message: "REJECTED: STOP_SPENDING is on." };
+  if (!Number.isSafeInteger(amount) || amount <= 0) return { ok: false, code: "BAD_AMOUNT", message: "REJECTED: Invalid Gryd purchase amount." };
+  if (amount > policy.maxPerTxSats) return { ok: false, code: "CAP", message: "REJECTED: Exceeds gryd.maxPerTxSats." };
+  if (spentToday > policy.maxPerDaySats - amount) return { ok: false, code: "DAY", message: "REJECTED: Exceeds gryd.maxPerDaySats." };
+  return { ok: true };
+}
+
 export type Policy = {
+  gryd?: GrydPolicy;
   maxSatsPerTx: number;
   maxSatsPerDay: number | null;
   maxSatsLifetime: number | null;
@@ -333,12 +355,17 @@ export function usageFromLog(lines: string[], now: Date = new Date(), asset = "b
       const row = JSON.parse(trimmed) as { t?: string; amount?: unknown; fee?: unknown; kind?: unknown; asset?: unknown };
       if (row.kind === "sweep" || row.kind === "split" || row.kind === "allowance-sweep") continue;
       const rowAsset = typeof row.asset === "string" ? row.asset : "bsv";
-      if (!(BRC181_SCOPES[asset] ?? [asset]).includes(rowAsset)) continue;
+      if (asset === "gryd") {
+        if (row.kind !== "agent-buy") continue;
+      } else if (!(BRC181_SCOPES[asset] ?? [asset]).includes(rowAsset)) continue;
       let amount =
         typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
       if (asset === "brc181-bsv" && typeof row.fee === "number" && Number.isSafeInteger(row.fee) && row.fee > 0) amount += row.fee;
       spentLifetime += amount;
-      if (typeof row.t === "string" && row.t.slice(0, 10) === today) spentToday += amount;
+      if (typeof row.t === "string") {
+        const day = asset === "gryd" ? (Number.isFinite(Date.parse(row.t)) ? utcDay(new Date(row.t)) : "") : row.t.slice(0, 10);
+        if (day === today) spentToday += amount;
+      }
     } catch {
       continue;
     }

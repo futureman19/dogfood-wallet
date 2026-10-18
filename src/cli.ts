@@ -51,7 +51,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts allowance-list
   bun src/cli.ts allowance-sweep [p2pkh-address]
   bun src/cli.ts allowance-sweep --record <record-id> [p2pkh-address]
-  bun src/cli.ts policy-inspect <envelope-json-or-file>
+  bun src/cli.ts policy-inspect [envelope-json-or-file]  (no argument: local policy)
   bun src/cli.ts policy-issue --origin <token> --per-tx <n> --total <n> --max-fee <n> --purpose <text> [--allow <dest>]... [--dest-cap <dest>=<n>]... [--expires <epoch>] [--write] [--force]
   bun src/cli.ts mcp
   bun src/cli.ts mcp-http
@@ -329,7 +329,13 @@ async function main() {
       break;
     }
     case "policy-inspect": {
-      if (!a) die("Usage: policy-inspect <envelope-json-or-file>");
+      if (!a) {
+        const { parseStoredPolicy } = await import("./vault");
+        const paths = vaultPaths(root);
+        const policy = parseStoredPolicy(readFileSync(paths.policy, "utf8"), existsSync(paths.kill));
+        console.log(JSON.stringify({ ok: true, ...policy }, null, 2));
+        break;
+      }
       const text = existsSync(a) ? readFileSync(a, "utf8") : [a, b, ...rest].filter(Boolean).join(" ");
       let parsed: unknown;
       try {

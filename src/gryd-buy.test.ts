@@ -224,6 +224,48 @@ test("default ARC transport is intercepted; no backend POST; txid mismatch retai
   }
 });
 
+test("scoped Gryd budget replaces local address gates only for purchases", async () => {
+  for (const scenario of ["allowed", "absent", "per-tx", "daily", "kill", "envelope", "malformed"]) {
+    const h = harness();
+    try {
+      const policy = { ...JSON.parse(readFileSync(join(h.root, "policy.json"), "utf8")), allowlist: [], maxSatsPerTx: 1, maxSatsPerDay: 1,
+        ...(scenario === "absent" ? {} : { gryd: scenario === "malformed" ? null : { maxPerTxSats: scenario === "per-tx" ? 1024 : 1025, maxPerDaySats: 2050 } }) };
+      writeFileSync(join(h.root, "policy.json"), JSON.stringify(policy));
+      const today = new Date().toISOString();
+      writeFileSync(join(h.root, "spends.jsonl"), [
+        { t: today, kind: "agent-buy", amount: scenario === "daily" ? 1026 : 1025, fee: 9000 },
+        { t: today, kind: "send", amount: 999999 },
+        { t: "2000-01-01T00:00:00Z", kind: "agent-buy", amount: 999999 },
+      ].map(r => JSON.stringify(r)).join("\n") + "\n");
+      if (scenario === "kill") killVault(h.root);
+      if (scenario === "envelope") writeFileSync(join(h.root, "brc181.json"), JSON.stringify(issuePolicyEnvelope(h.vault.key, { origin: "test", perTxCap: 9999999, totalBudget: 99999999, maxFee: 999999, purpose: "test", allowlist: [canonicalDest(new P2PKH().lock(seller).toHex())!], destCaps: [] })));
+      const call = buyAgent({ root: h.root, listingOutpoint: h.point, maxPriceSats: 1000, noBroadcast: true, fetchFn: h.fetchFn, broadcast: h.broadcast });
+      if (scenario === "allowed") expect((await call).mode).toBe("preview");
+      else await expect(call).rejects.toThrow();
+      expect(h.raw).toBe(""); expect(inspectPaymentHold(h.root).blocked).toBe(false);
+    } finally { h.clean(); }
+  }
+});
+
+test("malformed Gryd policy fails closed and policy-inspect shows validated budget without decrypting keys", () => {
+  const h = harness();
+  try {
+    const path = join(h.root, "policy.json"), base = JSON.parse(readFileSync(path, "utf8"));
+    for (const gryd of [null, [], false, {}, { maxPerTxSats: 10 }, { maxPerTxSats: "10", maxPerDaySats: 20 }, { maxPerTxSats: -1, maxPerDaySats: 20 }, { maxPerTxSats: 1.5, maxPerDaySats: 20 }, { maxPerTxSats: 10, maxPerDaySats: null }, { maxPerTxSats: 10, maxPerDaySats: Number.MAX_SAFE_INTEGER + 1 }]) {
+      writeFileSync(path, JSON.stringify({ ...base, gryd }));
+      expect(() => loadVault(h.root)).toThrow("gryd");
+    }
+    const gryd = { maxPerTxSats: 0, maxPerDaySats: 0 };
+    writeFileSync(path, JSON.stringify({ ...base, gryd }));
+    const run = () => Bun.spawnSync([process.execPath, "src/cli.ts", "policy-inspect"], { cwd: join(import.meta.dir, ".."), env: { ...process.env, DOGFOOD_WALLET_DIR: h.root } });
+    writeFileSync(join(h.root, "wif.enc"), "deliberately unreadable key");
+    const result = run(); expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout.toString()).gryd).toEqual(gryd);
+    writeFileSync(path, JSON.stringify({ ...base, gryd: {} }));
+    expect(run().exitCode).not.toBe(0);
+  } finally { h.clean(); }
+});
+
 test("killfile and invalid human max reject without network", async () => {
   const h = harness();
   try {

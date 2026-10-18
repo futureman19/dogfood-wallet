@@ -133,15 +133,61 @@ unspent result is indexer evidence, not independent SPV or a guarantee against a
 concurrent seller cancellation. Funding prevouts receive the same txid/vout/value
 checks plus exact payment-address P2PKH matching; one-sat coins are excluded.
 
-**Both seller and Fund must be allowed.** Local `policy.json` uses their base58
-addresses (owner `allow` command). An installed BRC-181 envelope must permit both
-`p2pkh:<hash160>` destinations. Both gates see **price + marketplace fee** as the
-aggregate payout, and BRC-181 additionally sees the actual miner fee and cumulative
-BSV usage. This conservatively applies each per-destination cap to the entire
-payout, not only that destination's share. Existing BRC-181 evaluator limitations
+**Default: both seller and Fund must be allowed.** Without a `gryd` block,
+local `policy.json` uses their base58 addresses (owner `allow` command) and the
+existing local per-transaction/day/lifetime caps. An installed BRC-181 envelope
+must permit both `p2pkh:<hash160>` destinations. Gates see **price + marketplace
+fee** as the aggregate payout; BRC-181 also sees actual miner fees and cumulative
+BSV usage. Per-destination envelope caps conservatively apply to the entire
+payout, not just that destination's share. Existing BRC-181 evaluator limitations
 (e.g. expiry/rate-window fields are not enforced) remain unchanged. A successful
 buy logs the aggregate amount once, with miner fee separate; failed/ambiguous
 broadcasts retain the shared durable payment hold and never auto-retry.
+
+### Optional scoped Gryd purchase budget
+
+An owner may add this block to the selected vault's `policy.json` (example limits,
+not a recommendation or an installed policy):
+
+```json
+"gryd": { "maxPerTxSats": 5000, "maxPerDaySats": 20000 }
+```
+
+A valid block enables a **buyAgent-only** local policy scope: neither the
+covenant-verified seller payout nor the hardcoded Gryd Fund destination needs a
+local address allowlist entry. Instead, `maxPerTxSats` bounds **price + marketplace
+fee**, and `maxPerDaySats` bounds the same amount plus the current UTC day's sum
+of `amount` in `spends.jsonl` rows whose `kind` is `agent-buy`. Earlier purchases
+count even if made before enabling the block. Other spend kinds and other UTC
+days do not count toward this scoped day budget. Miner fees remain separate from
+these two limits; installed BRC-181 fee and total-budget checks still include
+them. Zero is valid and denies purchases; both fields must be nonnegative safe
+integer numbers. Missing fields, null, strings, arrays, fractions, negatives and
+unsafe values fail closed, never fall back to legacy permission.
+
+This scoped budget replaces the ordinary local address/per-tx/day/lifetime gate
+**only for Gryd purchases**. Ordinary sends and all other rails retain their
+existing gates. Successful purchase rows still count in ordinary BSV usage for
+subsequent operations. The killfile always overrides the budget. **An installed
+BRC-181 envelope is never widened:** both seller and Fund must still satisfy its
+destination rules, caps, miner-fee ceiling and cumulative budget. The CLI human
+max-price cap, exact covenant checks, ordinal isolation and shared payment hold
+also remain mandatory. No MCP tool or automatic policy editor is added.
+
+Rationale: per-address allowlists do not fit an open marketplace where every
+seller has a different address. The containment is the **covenant-verified atomic
+swap**: the transaction pays the exact embedded seller payout while transferring
+the ordinal to the buyer's isolated property identity. This is a scoped exemption
+for that checked transaction shape, not permission to send arbitrary payments.
+It does not establish an item's value or authenticity beyond existing chain and
+listing checks; the budget bounds exposure, not investment quality.
+
+Run `policy-inspect` with **no argument** to print the selected vault's normalized
+local policy, including `gryd` when present and killfile state. It is read-only,
+validates the block and never decrypts keys. The existing
+`policy-inspect <envelope-json-or-file>` retains its BRC-181 verification behavior.
+Stop operators before editing policy; this change does not install a block in any
+vault or grant an agent access to a CLI it did not already have.
 
 **Ordinal isolation:** output 0 goes to a dedicated property address derived by
 `vault.key.deriveChild(vault.key.toPublicKey(), "dogfood/gryd/property/v1")`.

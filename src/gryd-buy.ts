@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { ORD_LOCK_PREFIX, ORD_LOCK_SUFFIX } from "./gryd-ordlock-constants";
 import { p2pkhAddressFromLock } from "./x402";
 import { loadVault, loadUsage, vaultPaths } from "./vault";
-import { evaluateSend } from "./policy";
+import { evaluateSend, evaluateGrydBuy } from "./policy";
 import { gateAgentSend, loadPolicyEnvelope } from "./brc181";
 import { withPaymentGuard } from "./payment-guard";
 import { defaultBroadcast, type Utxo } from "./send";
@@ -145,9 +145,16 @@ export async function buyAgent(options: BuyOptions): Promise<BuyResult> {
     const usage = loadUsage(options.root);
     const spentTotal = loadUsage(options.root, new Date(), "brc181-bsv").spentLifetime;
     const gate = (fee: number) => {
-      for (const to of [decoded.payAddress, GRYD_FUND]) {
-        const local = evaluateSend(vault.policy, amount, to, usage);
+      const scoped = vault.policy.gryd;
+      if (scoped) {
+        const local = evaluateGrydBuy(scoped, vault.policy.killfileOn, amount, loadUsage(options.root, new Date(), "gryd").spentToday);
         if (!local.ok) throw new Error(local.message);
+      }
+      for (const to of [decoded.payAddress, GRYD_FUND]) {
+        if (!scoped) {
+          const local = evaluateSend(vault.policy, amount, to, usage);
+          if (!local.ok) throw new Error(local.message);
+        }
         // Aggregate debit for both destinations: conservative per-destination caps.
         const signed = gateAgentSend({ envelope: loaded.envelope, to, amount, fee, spentTotal });
         if (!signed.ok) throw new Error(signed.message);

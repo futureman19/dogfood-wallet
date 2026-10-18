@@ -8,6 +8,7 @@ import {
   DEFAULT_MAX_SATS_PER_DAY,
   isValidAddress,
   usageFromLog,
+  parseGrydPolicy,
   type BridgePolicy,
   type EvmAssetPolicy,
   type Policy,
@@ -151,7 +152,7 @@ function parsePolicyObject(raw: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
+export function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
   const parsed = parsePolicyObject(raw);
   const maxSatsPerTx =
     typeof parsed.maxSatsPerTx === "number" && parsed.maxSatsPerTx > 0 ? parsed.maxSatsPerTx : DEFAULT_MAX_SATS;
@@ -169,6 +170,7 @@ function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
     evm: parseEvmBlock(parsed.evm),
     solana: parseEvmBlock(parsed.solana), // same pocket shape, solana.usdc key
     bridge: parseBridgeBlock(parsed.bridge),
+    gryd: parseGrydPolicy(parsed.gryd),
   };
 }
 
