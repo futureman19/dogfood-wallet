@@ -205,7 +205,7 @@ export async function buyAgent(options: BuyOptions): Promise<BuyResult> {
       if (!spend.validate()) throw new Error("Purchase input script validation failed; hold retained");
     }
     const rawTx = tx.toHex(), purchaseTxid = tx.id("hex");
-    const envelope = signAgentRequest("agent.buy", { close_txid: purchaseTxid }, { method: "POST", path: `/api/v1/agents/${encodeURIComponent(agentId)}/listing/close` }, property);
+    const envelope = signAgentRequest("agent.buy", { close_txid: purchaseTxid }, { method: "POST", path: `/api/v1/agents/${encodeURIComponent(agentId)}/listing/close` }, property, { network: "mainnet" });
     const directory = join(options.root, "gryd-purchases");
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const fd = openSync(join(directory, `${purchaseTxid}.json`), "wx", 0o600);

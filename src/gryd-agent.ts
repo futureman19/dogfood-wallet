@@ -96,13 +96,13 @@ export function signAgentRequest(action: SignedWriteAction, body: Record<string,
 
 /** Internal origination signer: fixed action and route; agent-call stays agent-only. */
 export function signObjectMintRequest(body: Record<string, unknown>, key: PrivateKey): SignedAgentRequest<"object.mint"> {
-  const base = buildEnvelope("agent.create", body, {method: "POST", path: "/api/v1/objects/mint"}, {});
+  const base = buildEnvelope("agent.create", body, {method: "POST", path: "/api/v1/objects/mint"}, {network: "mainnet"});
   return signEnvelope({...base, action: "object.mint"}, key);
 }
 
 /** Human-supervised vault boundary: validate before key access; no HTTP or writes. */
 export function signVaultAgentRequest(root: string, action: SignedWriteAction, body: Record<string, unknown>, request: RequestBinding): SignedAgentRequest {
-  const payload = buildEnvelope(action, body, request, {});
+  const payload = buildEnvelope(action, body, request, {network: "mainnet"});
   const vault = loadVault(root);
   if (vault.policy.killfileOn) throw new Error("STOP_SPENDING is on; refusing agent signing");
   return signEnvelope(payload, vault.key);

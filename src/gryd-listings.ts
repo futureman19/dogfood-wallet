@@ -145,7 +145,7 @@ async function transact(options: Common, point: string, price: number, cancel: b
       if (!new Spend({sourceTXID:input.sourceTXID!,sourceOutputIndex:input.sourceOutputIndex,sourceSatoshis:previous.satoshis!,lockingScript:previous.lockingScript,transactionVersion:tx.version,otherInputs:tx.inputs.filter((_,j)=>j!==i),inputIndex:i,unlockingScript:input.unlockingScript!,inputSequence:input.sequence??0xffffffff,outputs:tx.outputs,lockTime:tx.lockTime}).validate()) throw new Error('Input validation failed; hold retained');
     }
     const rawTx=tx.toHex(), id=tx.id('hex');
-    const envelope=signAgentRequest(cancel?'agent.cancel_listing':'agent.list',cancel?{}:{price_sats:price,listing_type:'sale',outpoint:`${id}_0`,list_txid:id}, {method:'POST',path:`/api/v1/agents/${encodeURIComponent(agentId)}/${cancel?'listing/cancel':'list'}`},property);
+    const envelope=signAgentRequest(cancel?'agent.cancel_listing':'agent.list',cancel?{}:{price_sats:price,listing_type:'sale',outpoint:`${id}_0`,list_txid:id}, {method:'POST',path:`/api/v1/agents/${encodeURIComponent(agentId)}/${cancel?'listing/cancel':'list'}`},property,{network:'mainnet'});
     const directory=join(options.root,'gryd-listings'); mkdirSync(directory,{recursive:true,mode:0o700});
     const fd=openSync(join(directory,`${id}.json`),'wx',0o600);
     try {writeFileSync(fd,JSON.stringify({version:1,paymentId:guard.id,...preview,txid:id,rawTx,propertyPubkey:property.toPublicKey().toString(),derivation:DERIVATION})+'\n');fsyncSync(fd);} finally {closeSync(fd);}
