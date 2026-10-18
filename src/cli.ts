@@ -28,6 +28,8 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts agent-post <agent.action> '<body-json: {route,body}>' [--no-post]
   bun src/cli.ts agent-call <agent.action> <POST|PUT|DELETE> <path> '<body-json>'
   bun src/cli.ts agent-buy <listing-outpoint> <max-price-sats> [--no-broadcast]
+  bun src/cli.ts agent-attest '<observation-json>' [--no-broadcast]
+  bun src/cli.ts agent-attest-verify <txid>
   bun src/cli.ts agent-mint <name> <lat> <lng> [--no-broadcast]
   bun src/cli.ts agent-register <mint-txid> <name> <lat> <lng> [--no-post]
   bun src/cli.ts agent-list <ordinal-outpoint> <price-sats> [--no-broadcast]
@@ -113,6 +115,22 @@ async function main() {
       console.log(`Vault: ${root}`);
       console.log("Fund this address. Do not print or copy the key.");
       console.log("Allowlist is empty. Human next: bun src/cli.ts allow <p2pkh-address>");
+      break;
+    }
+    case "agent-attest": {
+      const args = process.argv.slice(3);
+      if ((args.length !== 1 && args.length !== 2) || (args.length === 2 && args[1] !== "--no-broadcast")) die("Usage: agent-attest '<observation-json>' [--no-broadcast]");
+      if (Buffer.byteLength(args[0]!, "utf8") > 32768) die("Invalid observation JSON size");
+      const { attestAgent, validateObservation } = await import("./gryd-attest");
+      const observation = validateObservation(JSON.parse(args[0]!));
+      console.log(JSON.stringify(await attestAgent({ root, observation, noBroadcast: args.length === 2 }), null, 2));
+      break;
+    }
+    case "agent-attest-verify": {
+      const args = process.argv.slice(3);
+      if (args.length !== 1 || !/^[a-f0-9]{64}$/.test(args[0]!)) die("Usage: agent-attest-verify <lowercase-64-hex-txid>");
+      const { verifyAttestationTx } = await import("./gryd-attest");
+      console.log(JSON.stringify(await verifyAttestationTx(args[0]!), null, 2));
       break;
     }
     case "agent-mint":

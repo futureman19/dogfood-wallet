@@ -616,6 +616,44 @@ manually; do not delete a hold merely to retry. Tests use disposable unfunded
 vaults, intercepted mutations and isolated MCP discovery; **no live sends,
 withdrawals, deposits or backend acceptance are claimed**.
 
+## Dogfood attestations (human-only, cryptographic authenticity)
+
+```sh
+bun src/cli.ts agent-attest '<observation-json>' [--no-broadcast]
+bun src/cli.ts agent-attest-verify <mint-txid>
+```
+
+`agent-attest` property-key signs the complete `{type,lat,lng,observedAt,source,
+payload,agent}` observation and mints a one-sat JSON ordinal to that same isolated
+property address. `agent.ownerAddress` **must be the property signer address**,
+not the parent payment address; the named agent/source is still only an assertion.
+`weather.reading`, `presence.attestation`, `event.report` and future namespaced
+types share the envelope. **Without `--no-broadcast`, it publishes permanently and
+spends miner fees on mainnet.** Preview is unsigned and emits no spendable bytes.
+Neither command is an MCP tool. No API server, selling endpoint or live feed is
+added, and no Gryd registration is submitted.
+
+Uses the exact Phase 4 inscription template, checked main-address coins >1
+smallest-first, self-change, killfile recheck, shared fee-bearing reservation,
+per-input Spend validation and exclusive fsynced private
+`gryd-attestations/<txid>.json` evidence **before broadcast**. Ambiguity retains a
+hold with no automatic retry. Owner mint semantics record amount zero and actual
+miner fee; other payment gates are unchanged.
+
+The public verifier needs **no vault or keys and writes nothing**. It hash-checks
+raw transaction bytes, requires the exact one-sat inscription, validates schema
+and signature and binds the signer to the locking property address. It reports
+`authentic:true`, **not truth of weather/source, named-agent ownership, unspent
+status or confirmation**. Source refs are inert text and never fetched; fixed
+chain reads reject redirects, limit responses to 2 MiB and use 30-second deadlines.
+
+Signing reuses Gryd's exact canonical JSON rules from pinned `origin/dev`
+`e6763c71f75a12acf8df3529e4ccc3fd50b16d80`, but uses the explicit application domain
+`Dogfood Attestation v1\n`, **not Locus signed-write authorization**. See the
+[attestation specification](docs/gryd-attestation-spec.md) for the verbatim source
+quote/hash, strict schema, full observation example, signed wrapper bytes,
+identity limitations, recovery precautions and reproducible synthetic vectors.
+
 ## Direct-send fee ceiling
 
 `send <to-address> <sats> --max-fee <fee-sats> [note]` optionally bounds the

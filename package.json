@@ -65,6 +65,8 @@
     "src/fee-delegator.ts",
     "src/fund-request.ts",
     "src/gryd-agent.ts",
+    "src/gryd-attest.ts",
+    "docs/gryd-attestation-spec.md",
     "src/gryd-buy.ts",
     "src/gryd-listings.ts",
     "src/gryd-mint.ts",

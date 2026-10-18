@@ -1,0 +1,180 @@
+{
+  "sourceRef": "origin/dev",
+  "sourceCommit": "e6763c71f75a12acf8df3529e4ccc3fd50b16d80",
+  "sourcePath": "packages/locus-protocol/src/signed-write.ts",
+  "sourceSha256": "49eb1af56c138d819032df175f63952d9cd26e48657c9e8332a234c463e53ad5",
+  "protocolPrefix": "Locus Signed Write\n",
+  "attestationPrefix": "Dogfood Attestation v1\n",
+  "syntheticKey": "public scalar 1 (never fund)",
+  "vectors": [
+    {
+      "observation": {
+        "agent": {
+          "id": "synthetic:scout",
+          "ownerAddress": "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+        },
+        "lat": 12.5,
+        "lng": -20,
+        "observedAt": "2026-01-02T03:04:05.000Z",
+        "payload": {
+          "2": "two",
+          "10": "ten",
+          "temperatureC": 21,
+          "unicode": "雪"
+        },
+        "source": {
+          "kind": "sensor",
+          "ref": "station:synthetic-1"
+        },
+        "type": "weather.reading"
+      },
+      "canonical": "{\"agent\":{\"id\":\"synthetic:scout\",\"ownerAddress\":\"1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH\"},\"lat\":12.5,\"lng\":-20,\"observedAt\":\"2026-01-02T03:04:05.000Z\",\"payload\":{\"10\":\"ten\",\"2\":\"two\",\"temperatureC\":21,\"unicode\":\"雪\"},\"source\":{\"kind\":\"sensor\",\"ref\":\"station:synthetic-1\"},\"type\":\"weather.reading\"}",
+      "message": "Dogfood Attestation v1\n{\"agent\":{\"id\":\"synthetic:scout\",\"ownerAddress\":\"1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH\"},\"lat\":12.5,\"lng\":-20,\"observedAt\":\"2026-01-02T03:04:05.000Z\",\"payload\":{\"10\":\"ten\",\"2\":\"two\",\"temperatureC\":21,\"unicode\":\"雪\"},\"source\":{\"kind\":\"sensor\",\"ref\":\"station:synthetic-1\"},\"type\":\"weather.reading\"}",
+      "utf8Hex": "446f67666f6f64204174746573746174696f6e2076310a7b226167656e74223a7b226964223a2273796e7468657469633a73636f7574222c226f776e657241646472657373223a22314267475a3974634e34726d394b427a446e374b7072517a3837535a323653414d48227d2c226c6174223a31322e352c226c6e67223a2d32302c226f627365727665644174223a22323032362d30312d30325430333a30343a30352e3030305a222c227061796c6f6164223a7b223130223a2274656e222c2232223a2274776f222c2274656d706572617475726543223a32312c22756e69636f6465223a22e99baa227d2c22736f75726365223a7b226b696e64223a2273656e736f72222c22726566223a2273746174696f6e3a73796e7468657469632d31227d2c2274797065223a22776561746865722e72656164696e67227d",
+      "signed": {
+        "observation": {
+          "agent": {
+            "id": "synthetic:scout",
+            "ownerAddress": "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+          },
+          "lat": 12.5,
+          "lng": -20,
+          "observedAt": "2026-01-02T03:04:05.000Z",
+          "payload": {
+            "2": "two",
+            "10": "ten",
+            "temperatureC": 21,
+            "unicode": "雪"
+          },
+          "source": {
+            "kind": "sensor",
+            "ref": "station:synthetic-1"
+          },
+          "type": "weather.reading"
+        },
+        "pubkey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "signature": "IH0ouUqJWhyCS7f/ilfs/z5DDtjC334PXb489mP5NdisKmIPBaCeDAhuoZOhkb2AREmYPxDRwJ2GDBIGz63VpMA="
+      }
+    },
+    {
+      "observation": {
+        "agent": {
+          "id": "synthetic:scout",
+          "ownerAddress": "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+        },
+        "lat": 12.5,
+        "lng": -20,
+        "observedAt": "2026-01-02T03:04:05.000Z",
+        "payload": {
+          "a": {
+            "2": 2,
+            "10": 10,
+            "02": "02"
+          },
+          "text": "Café 🌍\n\"quoted\"\\",
+          "z": [
+            true,
+            false,
+            null,
+            0,
+            1e-7,
+            1e+21
+          ]
+        },
+        "source": {
+          "kind": "human",
+          "ref": "manual:synthetic"
+        },
+        "type": "presence.attestation"
+      },
+      "canonical": "{\"agent\":{\"id\":\"synthetic:scout\",\"ownerAddress\":\"1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH\"},\"lat\":12.5,\"lng\":-20,\"observedAt\":\"2026-01-02T03:04:05.000Z\",\"payload\":{\"a\":{\"02\":\"02\",\"10\":10,\"2\":2},\"text\":\"Café 🌍\\n\\\"quoted\\\"\\\\\",\"z\":[true,false,null,0,1e-7,1e+21]},\"source\":{\"kind\":\"human\",\"ref\":\"manual:synthetic\"},\"type\":\"presence.attestation\"}",
+      "message": "Dogfood Attestation v1\n{\"agent\":{\"id\":\"synthetic:scout\",\"ownerAddress\":\"1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH\"},\"lat\":12.5,\"lng\":-20,\"observedAt\":\"2026-01-02T03:04:05.000Z\",\"payload\":{\"a\":{\"02\":\"02\",\"10\":10,\"2\":2},\"text\":\"Café 🌍\\n\\\"quoted\\\"\\\\\",\"z\":[true,false,null,0,1e-7,1e+21]},\"source\":{\"kind\":\"human\",\"ref\":\"manual:synthetic\"},\"type\":\"presence.attestation\"}",
+      "utf8Hex": "446f67666f6f64204174746573746174696f6e2076310a7b226167656e74223a7b226964223a2273796e7468657469633a73636f7574222c226f776e657241646472657373223a22314267475a3974634e34726d394b427a446e374b7072517a3837535a323653414d48227d2c226c6174223a31322e352c226c6e67223a2d32302c226f627365727665644174223a22323032362d30312d30325430333a30343a30352e3030305a222c227061796c6f6164223a7b2261223a7b223032223a223032222c223130223a31302c2232223a327d2c2274657874223a22436166c3a920f09f8c8d5c6e5c2271756f7465645c225c5c222c227a223a5b747275652c66616c73652c6e756c6c2c302c31652d372c31652b32315d7d2c22736f75726365223a7b226b696e64223a2268756d616e222c22726566223a226d616e75616c3a73796e746865746963227d2c2274797065223a2270726573656e63652e6174746573746174696f6e227d",
+      "signed": {
+        "observation": {
+          "agent": {
+            "id": "synthetic:scout",
+            "ownerAddress": "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+          },
+          "lat": 12.5,
+          "lng": -20,
+          "observedAt": "2026-01-02T03:04:05.000Z",
+          "payload": {
+            "a": {
+              "2": 2,
+              "10": 10,
+              "02": "02"
+            },
+            "text": "Café 🌍\n\"quoted\"\\",
+            "z": [
+              true,
+              false,
+              null,
+              0,
+              1e-7,
+              1e+21
+            ]
+          },
+          "source": {
+            "kind": "human",
+            "ref": "manual:synthetic"
+          },
+          "type": "presence.attestation"
+        },
+        "pubkey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "signature": "IHlOr/KynzWJYQzw+Ij9NKOvbKv82K7pC5r0b4KXhtmhYX689Io1BKQdbxyDH5r1dJXbAjQPfPKUTlCpvmQCJyk="
+      }
+    },
+    {
+      "observation": {
+        "agent": {
+          "id": "synthetic:scout",
+          "ownerAddress": "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+        },
+        "lat": 12.5,
+        "lng": -20,
+        "observedAt": "2026-01-02T03:04:05.000Z",
+        "payload": {
+          "event": "synthetic",
+          "nested": {
+            "a": 2,
+            "z": 1
+          }
+        },
+        "source": {
+          "kind": "api",
+          "ref": "https://example.invalid/not-fetched"
+        },
+        "type": "event.report"
+      },
+      "canonical": "{\"agent\":{\"id\":\"synthetic:scout\",\"ownerAddress\":\"1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH\"},\"lat\":12.5,\"lng\":-20,\"observedAt\":\"2026-01-02T03:04:05.000Z\",\"payload\":{\"event\":\"synthetic\",\"nested\":{\"a\":2,\"z\":1}},\"source\":{\"kind\":\"api\",\"ref\":\"https://example.invalid/not-fetched\"},\"type\":\"event.report\"}",
+      "message": "Dogfood Attestation v1\n{\"agent\":{\"id\":\"synthetic:scout\",\"ownerAddress\":\"1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH\"},\"lat\":12.5,\"lng\":-20,\"observedAt\":\"2026-01-02T03:04:05.000Z\",\"payload\":{\"event\":\"synthetic\",\"nested\":{\"a\":2,\"z\":1}},\"source\":{\"kind\":\"api\",\"ref\":\"https://example.invalid/not-fetched\"},\"type\":\"event.report\"}",
+      "utf8Hex": "446f67666f6f64204174746573746174696f6e2076310a7b226167656e74223a7b226964223a2273796e7468657469633a73636f7574222c226f776e657241646472657373223a22314267475a3974634e34726d394b427a446e374b7072517a3837535a323653414d48227d2c226c6174223a31322e352c226c6e67223a2d32302c226f627365727665644174223a22323032362d30312d30325430333a30343a30352e3030305a222c227061796c6f6164223a7b226576656e74223a2273796e746865746963222c226e6573746564223a7b2261223a322c227a223a317d7d2c22736f75726365223a7b226b696e64223a22617069222c22726566223a2268747470733a2f2f6578616d706c652e696e76616c69642f6e6f742d66657463686564227d2c2274797065223a226576656e742e7265706f7274227d",
+      "signed": {
+        "observation": {
+          "agent": {
+            "id": "synthetic:scout",
+            "ownerAddress": "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+          },
+          "lat": 12.5,
+          "lng": -20,
+          "observedAt": "2026-01-02T03:04:05.000Z",
+          "payload": {
+            "event": "synthetic",
+            "nested": {
+              "a": 2,
+              "z": 1
+            }
+          },
+          "source": {
+            "kind": "api",
+            "ref": "https://example.invalid/not-fetched"
+          },
+          "type": "event.report"
+        },
+        "pubkey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "signature": "H27f7AG07osNlUZKra/jMSL7vsQ/vq0V+qLnI+V6BonKA+USVToojSML9AXGRK+HJkxPqApFfZIwchn78gUocBc="
+      }
+    }
+  ]
+}

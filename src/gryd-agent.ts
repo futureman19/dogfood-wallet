@@ -40,7 +40,7 @@ export const GRYD_ENVELOPE_SCOPE = { network: "mainnet", audience: "the-grid-api
 
 // Serialize directly: JSON.stringify on a reconstructed sorted object re-orders
 // integer-looking keys. Refuse non-JSON data that changes during transport.
-function canonicalJson(value: unknown, parents = new Set<object>()): string {
+export function canonicalJson(value: unknown, parents = new Set<object>()): string {
   if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
   if (typeof value === "number" && Number.isFinite(value)) return JSON.stringify(value);
   if (typeof value !== "object" || value === null) throw new Error("Body must contain only JSON values");
