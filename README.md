@@ -105,6 +105,99 @@ Regenerate deliberately with `bun scripts/gryd-agent-vectors.ts <grid-repo-root>
 review source hash/action-list changes rather than blindly accepting drift.
 Neither tests nor the packaged CLI require a Gryd checkout.
 
+## Gryd purchases (Phase 2: human-only)
+
+```bash
+# Inspect with an explicitly selected disposable vault; do not fund rehearsal vaults.
+DOGFOOD_WALLET_DIR=/absolute/path/to/disposable-vault \
+  bun src/cli.ts agent-buy <listing-txid>_0 <max-price-sats> --no-broadcast
+```
+
+**Without `--no-broadcast`, this command spends money.** It is owner-operated,
+not an MCP tool, and only supports `agent.buy` (no list, cancel or lock).
+The max is a positive decimal integer cap on the **embedded listing price**, not
+the total debit. The buyer additionally pays `ceil(price / 40)` (2.5%) to Gryd
+Fund `18Jc1Rq5Aw54UpCNLNvwoTLN4Uv5reTjCa` and a miner fee estimated at 1 sat/byte.
+Preview displays these separately, with every input/output amount, destination
+and role. Preview does chain/index GETs and validates policy, but never signs,
+prints raw spendable bytes, broadcasts, emits a close envelope or records a spend.
+It uses the shared payment lock temporarily and refuses existing holds.
+
+The listing must be a canonical **legacy OrdLock**, worth exactly one satoshi.
+WoC raw bytes must hash to the requested txid; the selected vout and satoshi value
+must match the script-hash unspent triple. Price and seller **payAddress** are
+parsed from the covenant's serialized payout, never from backend numbers or the
+separate cancellation key. Extended/wrapped scripts, OrdLockV2, non-P2PKH payouts,
+unknown/missing/spent listings and unavailable chain reads fail closed. The
+unspent result is indexer evidence, not independent SPV or a guarantee against a
+concurrent seller cancellation. Funding prevouts receive the same txid/vout/value
+checks plus exact payment-address P2PKH matching; one-sat coins are excluded.
+
+**Both seller and Fund must be allowed.** Local `policy.json` uses their base58
+addresses (owner `allow` command). An installed BRC-181 envelope must permit both
+`p2pkh:<hash160>` destinations. Both gates see **price + marketplace fee** as the
+aggregate payout, and BRC-181 additionally sees the actual miner fee and cumulative
+BSV usage. This conservatively applies each per-destination cap to the entire
+payout, not only that destination's share. Existing BRC-181 evaluator limitations
+(e.g. expiry/rate-window fields are not enforced) remain unchanged. A successful
+buy logs the aggregate amount once, with miner fee separate; failed/ambiguous
+broadcasts retain the shared durable payment hold and never auto-retry.
+
+**Ordinal isolation:** output 0 goes to a dedicated property address derived by
+`vault.key.deriveChild(vault.key.toPublicKey(), "dogfood/gryd/property/v1")`.
+Only the root payment address is queried for coin selection, including existing
+send/split/sweep flows; the property address is never in that pool. Keep this
+fixed derivation with your vault backup. Do not manually send property back to
+the payment address or import the property key as a payment vault. No property
+sweep/export/transfer command is added in this phase.
+
+The close-out envelope is signed by that **derived property identity**, not the
+root payment identity: Gryd's verifier requires ordinal output 0 to match the
+signed buyer. Gryd therefore records the derived identity as owner. The command
+finds a unique matching open agent sale in the public marketplace index (first
+200 results; missing/ambiguous entries fail closed), using it only for the agent
+ID/route, not economic amounts. On broadcast acknowledgement it prints an
+`agent.buy` envelope with `{ close_txid }` for
+`POST /api/v1/agents/<encoded-agent-id>/listing/close`. It **never POSTs** this
+request. Its normal short signature freshness window applies. ARC acknowledgement
+is not mining confirmation or backend close-out success; review and submit the
+close-out separately. Do not use Phase 1's root-key CLI to regenerate this derived
+identity envelope. A later recovery tool must explicitly use the property key.
+
+Construction decision: use **@bsv/sdk**, matching the web's pinned
+`@1sat/actions@0.0.197` / `@1sat/templates@0.0.30` legacy purchase algorithm and
+`@1sat/types@0.0.39` covenant bytes (MIT). No new dependencies. The actions flow
+requires BRC-100 create/sign action services, metadata/basket resolution and wallet
+tracking; adapting that lifecycle would obscure Dogfood's pre-sign gates, durable
+holds and unsigned preview. This is not a claim that actions cannot run in Bun.
+Input 0 is the listing; output 0 is the buyer ordinal, output 1 the exact seller
+payout, output 2 the Fund fee, output 3 payment change. Funding signatures bind all
+outputs. Every completed input is locally validated with SDK `Spend` before
+broadcast. `defaultBroadcast` uses ARC, retaining its existing WoC fallback only
+for explicit fee-policy rejections. Neither path is exercised against live funds
+by the test suite.
+
+The frozen real-chain fixture `testdata/gryd-buy-mainnet.json` contains purchase
+`3f6eb7708619f08ced495e790b9bb343043f5d2f75a56a9098636579c8bd70c1`,
+listing `363d0007faeb6424bdd2316af5487da80b45a4176e7f73419f1fb396bf2e42f8`,
+buyer funding and inscription origin bytes fetched read-only from WoC. This is a
+confirmed **Gryd QA sale**, not an organic-customer claim. The origin inscription
+says `Gryd Market close-E2E fixture (burnable)`; Gryd's committed QA scripts link
+that listing/purchase pair to the agent market. Historical sold API rows are not
+publicly retrievable. Tests recompute all txids, reproduce the purchase unlock
+byte-for-byte, validate both real input scripts, and check seller, Fund, ordinal
+lineage and miner-fee arithmetic. Synthetic unfunded fixtures separately exercise
+policy refusals and intercepted CLI/broadcast paths. No new live buy was made.
+
+Before broadcast, private local `gryd-purchases/<txid>.json` recovery evidence
+stores signed transaction bytes, input/output details, property public key and
+payment ID (no private keys). Treat those bytes as spendable authorization. A
+crash or timeout keeps the hold; inspect evidence and chain state manually, never
+rerun the purchase blindly. File fsync is used; Windows directory-fsync/power-loss
+limitations from the shared payment guard still apply. Do not edit policy or run
+unguarded spenders concurrently. Live-fire and backend acceptance are separate
+human-supervised review gates.
+
 ## Direct-send fee ceiling
 
 `send <to-address> <sats> --max-fee <fee-sats> [note]` optionally bounds the

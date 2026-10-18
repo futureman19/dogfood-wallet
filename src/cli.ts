@@ -26,6 +26,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [--max-fee <sats>] [--] [note]
   bun src/cli.ts agent-call <agent.action> <POST|PUT|DELETE> <path> '<body-json>'
+  bun src/cli.ts agent-buy <listing-outpoint> <max-price-sats> [--no-broadcast]
   bun src/cli.ts fund-request <sats>
   bun src/cli.ts kill
   bun src/cli.ts sweep <p2pkh-address>
@@ -59,6 +60,7 @@ Send --max-fee: optional nonnegative safe integer, decimal digits only; actual m
 Use -- before literal note tokens beginning with -. No preview or automatic retry.
 The LLM never sees the key. Policy lives in the signer.
 agent-call is human-only: prints an offline signed Gryd envelope; never sends it.
+agent-buy is human-only: purchases on chain by default; --no-broadcast is an unsigned preview.
 allow, sweep, split, fund-request, allowance-*, policy-inspect, and policy-issue are human-only (not MCP tools).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
@@ -102,6 +104,16 @@ async function main() {
       console.log(`Vault: ${root}`);
       console.log("Fund this address. Do not print or copy the key.");
       console.log("Allowlist is empty. Human next: bun src/cli.ts allow <p2pkh-address>");
+      break;
+    }
+    case "agent-buy": {
+      if (!a || !b || !/^[0-9]+$/.test(b) || !Number.isSafeInteger(Number(b)) || Number(b) <= 0
+        || rest.length > 1 || (rest.length === 1 && rest[0] !== "--no-broadcast")) {
+        die("Usage: agent-buy <listing-outpoint> <max-price-sats> [--no-broadcast]; positive decimal integer sats only");
+      }
+      const { buyAgent } = await import("./gryd-buy");
+      const result = await buyAgent({ root, listingOutpoint: a, maxPriceSats: Number(b), noBroadcast: rest[0] === "--no-broadcast" });
+      console.log(JSON.stringify(result, null, 2));
       break;
     }
     case "agent-call": {

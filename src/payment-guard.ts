@@ -46,7 +46,7 @@ export function inspectPaymentHold(root: string) {
       pending = "invalid";
       const row = JSON.parse(readFileSync(join(root, "payment.pending.json"), "utf8"));
       if (row?.version === 1 && typeof row.id === "string" && /^[0-9a-f-]{36}$/.test(row.id)
-        && ["send", "x402-pay", "x402-delegate", "split", "allowance-fund", "bridge-order", "bridge-funded"].includes(row.operation) && typeof row.started === "string" && Number.isFinite(Date.parse(row.started))
+        && ["send", "agent-buy", "x402-pay", "x402-delegate", "split", "allowance-fund", "bridge-order", "bridge-funded"].includes(row.operation) && typeof row.started === "string" && Number.isFinite(Date.parse(row.started))
         && ["bsv", "usdc-base", "usdc-solana"].includes(row.asset) && Number.isSafeInteger(row.amount)
         && (row.operation === "split"
           ? row.asset === "bsv" && row.amount === 0 && Number.isSafeInteger(row.fee) && row.fee >= 0
