@@ -8,6 +8,7 @@ import { withPaymentGuard } from './payment-guard';
 import { defaultBroadcast } from './send';
 import { signAgentRequest, type SignedAgentRequest } from './gryd-agent';
 import { p2pkhAddressFromLock } from './x402';
+import { propertyInscription, verifyRegistrationProfile } from './gryd-mint';
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 const API = 'https://the-grid-api.fly.dev/api/v1';
 const DERIVATION = 'dogfood/gryd/property/v1';
@@ -33,15 +34,16 @@ type Preview = {
 };
 export type ListingResult = Preview & ({mode: 'preview'} | {mode: 'broadcast'; txid: string; envelope: SignedAgentRequest});
 /** Read-only local provenance selects a route, never authorizes a chain spend.
- * Only output0 from a Dogfood purchase/list/cancel is resolvable. Unknown/imported
+ * Only output0 from a Dogfood purchase/list/cancel/registration is resolvable. Unknown/imported
  * ordinals fail closed: /agents/mine requires POST authorization, and the public
  * nearby index cannot discover arbitrary unlisted holdings without coordinates.
  */
-async function resolveIdentity(root: string, point: string, cancel: boolean, fetchFn: typeof fetch): Promise<string> {
+async function resolveIdentity(root: string, point: string, cancel: boolean, fetchFn: typeof fetch, propertyAddress: string): Promise<string> {
   const [txid, vout] = point.split('_');
   if (vout !== '0') throw new Error('Unresolved agent identity: local provenance requires output zero');
-  const directories = cancel ? ['gryd-listings'] : ['gryd-purchases', 'gryd-listings'];
+  const directories = cancel ? ['gryd-listings'] : ['gryd-purchases', 'gryd-listings', 'gryd-registrations'];
   const ids: string[] = [];
+  let mintBody: Record<string,unknown> | undefined;
   for (const dir of directories) {
     let text: string;
     try { text = readFileSync(join(root, dir, `${txid}.json`), 'utf8'); }
@@ -51,10 +53,19 @@ async function resolveIdentity(root: string, point: string, cancel: boolean, fet
       || Transaction.fromHex(record.rawTx).id('hex') !== txid || typeof record.agentId !== 'string'
       || !record.agentId || record.agentId.length > 256
       || (dir === 'gryd-listings' && record.operation !== (cancel ? 'agent-list' : 'agent-cancel-listing'))) throw new Error('Invalid local agent identity evidence');
+    if (dir === 'gryd-registrations') {
+      if (record.body?.txid !== txid || record.body?.ordinal_outpoint !== point || record.body?.owner_address !== propertyAddress) throw new Error('Invalid mint registration provenance');
+      const output = Transaction.fromHex(record.rawTx).outputs[0];
+      if (!output || output.satoshis !== 1) throw new Error('Invalid mint registration provenance');
+      const metadata = propertyInscription(output.lockingScript, propertyAddress);
+      if (Object.entries(metadata).some(([k,v]) => record.body[k] !== v) || JSON.stringify(record.body.metadata) !== JSON.stringify(metadata)) throw new Error('Invalid mint registration provenance');
+      mintBody = record.body;
+    }
     ids.push(record.agentId);
   }
   if (ids.length !== 1) throw new Error('Unresolved or ambiguous agent identity; local purchase/listing evidence required');
   const id = ids[0]!;
+  if (mintBody) { await verifyRegistrationProfile(id, mintBody, fetchFn); return id; }
   const response = await fetchFn(`${API}/agents/${encodeURIComponent(id)}`, {method: 'GET', redirect: 'error', signal: AbortSignal.timeout(30000)});
   if (!response.ok) throw new Error('Agent identity lookup unavailable');
   const data = await response.json();
@@ -88,13 +99,15 @@ async function transact(options: Common, point: string, price: number, cancel: b
       price = decoded.price;
       // Full-byte equality proves both cancellation hash and main-vault payout.
       if (ordinal.lockingScript.toHex() !== listingScript(propertyAddress, vault.address, price).toHex()) throw new Error('Listing cancellation ownership or payout mismatch');
-    } else if (ordinal.lockingScript.toHex() !== propertyLock.toHex()) throw new Error('Ordinal is not owned by the isolated property address');
+    } else if (ordinal.lockingScript.toHex() !== propertyLock.toHex()) {
+      propertyInscription(ordinal.lockingScript, propertyAddress);
+    }
     const scriptHash = Utils.toHex(Hash.sha256(ordinal.lockingScript.toBinary()).reverse());
     const checkOrdinal = async () => {
       if (!(await unspent(`${WOC}/script/${scriptHash}/unspent`, fetchFn)).some(u => u.tx_hash === txid && u.tx_pos === index && u.value === 1)) throw new Error('Ordinal spent or chain triple mismatch');
     };
     await checkOrdinal();
-    const agentId = await resolveIdentity(options.root, point, cancel, fetchFn);
+    const agentId = await resolveIdentity(options.root, point, cancel, fetchFn, propertyAddress);
     const fundingUrl = `${WOC}/address/${vault.address}/unspent`;
     const coins = (await unspent(fundingUrl, fetchFn)).filter(u => u.value > 1).sort((a,b) => a.value-b.value || a.tx_hash.localeCompare(b.tx_hash) || a.tx_pos-b.tx_pos);
     const tx = new Transaction();

@@ -268,10 +268,11 @@ is not dynamically negotiated. A successful ARC acknowledgement is neither
 backend acceptance nor mining confirmation. The cancellation envelope does not
 contain a cancellation txid because the exact current web API body is `{}`.
 
-Listing requires an exact one-sat P2PKH output owned by
-`dogfood/gryd/property/v1`. Source bytes must hash to the requested txid; vout,
-value, script and script-hash unspent evidence must agree. Inscription wrappers
-and other scripts are not accepted. Input 0 is property-key signed; output 0 is
+Listing requires a one-sat output owned by `dogfood/gryd/property/v1`: either
+exact P2PKH or the exact Phase 4 Dogfood JSON ord envelope followed by that P2PKH.
+Source bytes must hash to the requested txid; vout, value, script and script-hash
+unspent evidence must agree. Arbitrary inscription wrappers, alternate JSON,
+extra opcodes and other scripts are not accepted. Input 0 is property-key signed; output 0 is
 one sat in the byte-exact pinned legacy OrdLock, with property cancellation hash
 and requested positive safe-integer price payable to the main vault P2PKH.
 Cancellation accepts only that exact covenant with both self-controlled hashes,
@@ -290,7 +291,8 @@ so no purchase amount budget is consumed. Other rails retain their own gates.
 index only exposes open listings, while `/agents/mine` requires a signed POST.
 To avoid inventing a public inventory endpoint, Phase 3 resolves output-zero
 holdings from existing private `gryd-purchases/<txid>.json` evidence, or prior
-Phase 3 cancellation/listing evidence under `gryd-listings/`. It checks the stored
+Phase 3 cancellation/listing evidence under `gryd-listings/`, or verified Phase 4
+registration evidence under `gryd-registrations/`. It checks the stored
 transaction hash and unique agent ID, then confirms that ID using read-only
 `GET /api/v1/agents/<encoded-id>`. Prices and ownership never come from this
 metadata. Imported holdings, missing/corrupt/ambiguous evidence, nonzero vouts
@@ -322,6 +324,134 @@ they are usable short-lived authorizations, not receipts. No live broadcast or
 backend mutation is performed by tests. The real QA chain fixture validates
 listing-script byte identity; disposable synthetic list/cancel transactions
 validate all inputs and intercepted transport/evidence ordering separately.
+
+## Gryd origination (Phase 4: wallet-verified chain, backend metadata mirror)
+
+```bash
+# Rehearsal: select a disposable UNFUNDED vault and intercept all network calls.
+bun src/cli.ts agent-mint <name> <lat> <lng> --no-broadcast
+bun src/cli.ts agent-register <mint-txid> <name> <lat> <lng> --no-post
+```
+
+**Without the flags, mint broadcasts on mainnet and register POSTs a backend
+mutation.** Both are human CLI-only, never MCP. Tests mock every broadcast and
+HTTP mutation; no live mint/registration acceptance is claimed. No Gryd code or
+service is changed. Phase 3's separate cancellation/payout verifier limitation
+still applies to listings; a wallet-valid fresh-mint listing is not proof of
+backend listing acceptance.
+
+`agent-mint` uses main-address coins **greater than one sat**, smallest-first.
+It checks each source transaction hash, output index, amount and exact main
+P2PKH script, and refreshes the unspent triples before signing. Output 0 is
+exactly one sat to the isolated PROPERTY derivation
+`dogfood/gryd/property/v1`; output 1 is main-address change. All outputs are
+self-controlled: only the actual miner fee leaves the wallet. Like owner split
+and listing, mint bypasses purchase/allowlist/BRC-181 destination budgets, records
+amount zero and actual fee, but obeys STOP_SPENDING and the shared payment guard.
+Every signed input is validated with SDK `Spend` before broadcast.
+
+The script is `OP_FALSE OP_IF "ord" OP_1 "application/json" OP_0 <UTF-8 JSON>
+OP_ENDIF <property P2PKH>`. The chosen payload, in this exact key order, is:
+
+```json
+{"name":"Scout","class":"AGENT","rarity":"common","lat":12.5,"lng":-20}
+```
+
+This is **Dogfood's explicit application metadata choice**, matching accepted
+Gryd Object fields; it is not an existing canonical Gryd inscription/indexer
+schema. Class `AGENT` is required for the backend Object-to-agent projection.
+The real QA origin fixture is different: `text/plain` containing exactly
+`Gryd Market close-E2E fixture (burnable)`. Its original entire script is
+reproduced byte-for-byte in a separate test, not falsely attributed to the new
+JSON format. Names must be trimmed valid UTF-8, 1–200 bytes without controls;
+lat/lng must be finite and within ±90/±180. CLI coordinates accept signed decimal
+notation only, not whitespace, hex or exponents. Txids are lowercase 64-hex;
+extra/duplicate flags and malformed arguments fail before key access.
+
+Mint preview performs reads and temporarily acquires the lock but does not sign,
+reserve, write spendable evidence, emit raw bytes or broadcast. Normal mint
+reserves before signing and exclusively creates mode-0600, fsynced
+`gryd-mints/<txid>.json` **before** broadcast. It contains signed bytes, metadata,
+input/output amounts, payment ID and property public identity, never private keys.
+A timeout, wrong acknowledgement or persistence failure retains the hold. No
+automatic retry/rebroadcast or clearing command is added. Existing ARC behavior
+(including its explicit fee-policy fallback) is unchanged.
+
+### Exact registration contract
+
+`agent-register` independently fetches the supplied raw mint from WoC, recomputes
+its txid, verifies output 0 is one sat, verifies the **entire exact property
+inscription script and JSON**, matches the supplied name/location, and checks
+fresh script-hash unspent `(txid, 0, 1)` evidence. This is wallet validation using
+chain/indexer reads, **not independent SPV or protection against a concurrent
+spend**. Backend metadata never establishes on-chain ownership.
+
+The property identity signs the existing canonical `Locus Signed Write\n`
+format (compact base64 BSM). The fixed request is:
+
+- **POST `https://the-grid-api.fly.dev/api/v1/objects/mint`**
+- JSON wire envelope: `{ "payload": {...}, "signature": "...", "pubkey": "..." }`
+- Payload: `{ mode: "signed_write", method: "POST", path: "/api/v1/objects/mint",
+  action: "object.mint", body: <below>, timestamp: <Unix seconds>, nonce: <UUID> }`.
+  No network override is exposed. The exact signed body is:
+
+```json
+{
+  "txid": "<mint-txid>", "vout": 0,
+  "name": "Scout", "class": "AGENT", "rarity": "common", "lat": 12.5, "lng": -20,
+  "owner_address": "<derived-property-address>",
+  "ordinal_outpoint": "<mint-txid>_0",
+  "contentType": "application/json",
+  "contentUri": "https://ordinals.gorillapool.io/content/<mint-txid>_0",
+  "metadata": {"name":"Scout","class":"AGENT","rarity":"common","lat":12.5,"lng":-20}
+}
+```
+
+The content URI is a locator, not evidence that an external indexer has indexed
+or served it. `agent-call` remains restricted to the original agent action union;
+the `object.mint` signer has a fixed internal route/action. This is **not**
+`object.claim`, and not `POST /api/v1/agents` (which creates an off-chain agent).
+
+**Authority boundary:** inspected `World.mint_object` inserts submitted metadata
+and marks it ordinal without validating chain bytes or ownership. Signed-write
+authentication authenticates the submitter; it does not make the backend an
+ownership indexer. Dogfood supplies the chain validation above and treats the
+backend strictly as a metadata mirror. It requires `{success:true,object:{id,...}}`,
+checks returned fields for congruence, then reads
+`GET /api/v1/agents/object%3A<ID>`. That profile must have the exact ID, source
+`object`, matching owner and exact normalized mint output-zero outpoint. Every
+present name/location/txid/class/content/metadata alias must agree; conflicting
+camelCase/snake_case aliases fail closed. The backend profile omits some Object
+fields; absence of those optional fields is not independently verified metadata.
+
+### Registration intent, ambiguity and listing provenance
+
+Before either POST **or printing a no-post authorization**, Dogfood exclusively
+writes/fsyncs `gryd-registrations/<txid>.intent.json`. `--no-post` prints a signed
+envelope, not an unsigned preview, and never POSTs. It leaves a per-mint intent
+blocking blind reissuance/submission; it does not reserve a spending hold. Treat
+that envelope as usable short-lived remote authorization. Normal POST additionally
+reserves a zero-amount shared hold. HTTP response evidence goes to
+`<txid>.response.json`; received profile evidence to `<txid>.profile.json`;
+request/response transport failures get `<txid>.failure.json` when writable.
+Malformed, rejected, inconsistent or ambiguous outcomes retain the intent and
+shared hold. No automatic blind retry is possible.
+
+Only a successful checked profile creates `gryd-registrations/<txid>.json` with
+raw mint bytes, exact request body and `object:<id>` provenance. Completion is
+followed by fsynced zero-amount accounting before releasing the guard. A repeat
+on a completed registration rechecks the chain and known-ID GET **without POST**.
+There is no invented public txid lookup or safe automatic discovery after a lost
+response: stop spenders, retain all evidence, use a known returned ID for read-only
+human reconciliation, and never remove holds merely to retry. No automated
+ambiguous-state recovery/accounting repair is provided. Windows mode bits do not
+replace filesystem ACLs; shared directory-fsync/power-loss limitations apply.
+
+Fresh mint-to-list uses this checked registration provenance and the strict
+inscription parser. It signs the **whole original source script**, never an
+arbitrarily stripped suffix; every completed listing input is Spend-validated.
+Missing/ambiguous provenance or unsupported wrappers fail closed. All protocol
+vectors and prior agent-call behavior remain covered by the full test suite.
 
 ## Direct-send fee ceiling
 

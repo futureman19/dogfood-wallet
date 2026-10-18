@@ -27,6 +27,8 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts send <to-address> <sats> [--max-fee <sats>] [--] [note]
   bun src/cli.ts agent-call <agent.action> <POST|PUT|DELETE> <path> '<body-json>'
   bun src/cli.ts agent-buy <listing-outpoint> <max-price-sats> [--no-broadcast]
+  bun src/cli.ts agent-mint <name> <lat> <lng> [--no-broadcast]
+  bun src/cli.ts agent-register <mint-txid> <name> <lat> <lng> [--no-post]
   bun src/cli.ts agent-list <ordinal-outpoint> <price-sats> [--no-broadcast]
   bun src/cli.ts agent-cancel-listing <listing-outpoint> [--no-broadcast]
   bun src/cli.ts fund-request <sats>
@@ -61,6 +63,8 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
 Send --max-fee: optional nonnegative safe integer, decimal digits only; actual miner fee ceiling.
 Use -- before literal note tokens beginning with -. No preview or automatic retry.
 The LLM never sees the key. Policy lives in the signer.
+agent-mint and agent-register are human-only: broadcast / metadata POST by default.
+--no-broadcast is unsigned; --no-post prints a usable signed authorization, not a receipt.
 agent-call is human-only: prints an offline signed Gryd envelope; never sends it.
 agent-buy is human-only: purchases on chain by default; --no-broadcast is an unsigned preview.
 agent-list and agent-cancel-listing are human-only: broadcast by default; unsigned --no-broadcast preview.
@@ -108,6 +112,22 @@ async function main() {
       console.log(`Vault: ${root}`);
       console.log("Fund this address. Do not print or copy the key.");
       console.log("Allowlist is empty. Human next: bun src/cli.ts allow <p2pkh-address>");
+      break;
+    }
+    case "agent-mint":
+    case "agent-register": {
+      const args = process.argv.slice(3), registering = cmd === "agent-register";
+      const count = registering ? 4 : 3, flag = registering ? "--no-post" : "--no-broadcast";
+      if (args.length !== count && args.length !== count + 1 || args.length === count + 1 && args[count] !== flag) die(`Usage: ${cmd} ${registering ? "<mint-txid> " : ""}<name> <lat> <lng> [${flag}]`);
+      const [name, latText, lngText] = args.slice(registering ? 1 : 0, count);
+      const decimal = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/;
+      if (!latText || !lngText || !decimal.test(latText) || !decimal.test(lngText)) die("Coordinates must be signed decimal numbers, not hex/exponents/whitespace");
+      const { mintAgent, registerAgent } = await import("./gryd-mint");
+      const common = {root, name: name!, lat: Number(latText), lng: Number(lngText)};
+      const result = registering
+        ? await registerAgent({...common, mintTxid: args[0]!, noPost: args[count] === flag})
+        : await mintAgent({...common, noBroadcast: args[count] === flag});
+      console.log(JSON.stringify(result, null, 2));
       break;
     }
     case "agent-list": {

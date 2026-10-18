@@ -14,18 +14,18 @@ export const AGENT_WRITE_ACTIONS = [
   "agent.schedule.create", "agent.schedule.list", "agent.schedule.update", "agent.schedule.delete",
 ] as const;
 export type SignedWriteAction = (typeof AGENT_WRITE_ACTIONS)[number];
-export interface SignedWriteEnvelope {
+export interface SignedWriteEnvelope<A extends SignedWriteAction | "object.mint" = SignedWriteAction> {
   mode: "signed_write";
   method: "POST" | "PUT" | "DELETE";
   path: string;
-  action: SignedWriteAction;
+  action: A;
   body: Record<string, unknown>;
   timestamp: number;
   nonce: string;
   network?: "mainnet" | "testnet";
 }
-export interface SignedAgentRequest {
-  payload: SignedWriteEnvelope;
+export interface SignedAgentRequest<A extends SignedWriteAction | "object.mint" = SignedWriteAction> {
+  payload: SignedWriteEnvelope<A>;
   signature: string;
   pubkey: string;
   address: string;
@@ -64,7 +64,7 @@ function canonicalJson(value: unknown, parents = new Set<object>()): string {
 }
 
 /** Byte-identical to the protocol helper for JSON-compatible envelopes. */
-export function canonicalSignedWriteMessage(payload: SignedWriteEnvelope): string {
+export function canonicalSignedWriteMessage(payload: SignedWriteEnvelope<SignedWriteAction | "object.mint">): string {
   return "Locus Signed Write\n" + canonicalJson(payload);
 }
 
@@ -83,7 +83,7 @@ function buildEnvelope(action: SignedWriteAction, body: Record<string, unknown>,
   return payload;
 }
 
-function signEnvelope(payload: SignedWriteEnvelope, key: PrivateKey): SignedAgentRequest {
+function signEnvelope<A extends SignedWriteAction | "object.mint">(payload: SignedWriteEnvelope<A>, key: PrivateKey): SignedAgentRequest<A> {
   const message = canonicalSignedWriteMessage(payload);
   const signature = BSM.sign(Utils.toArray(message, "utf8"), key, "base64") as string;
   return { payload, signature, pubkey: key.toPublicKey().toString(), address: key.toAddress() };
@@ -92,6 +92,12 @@ function signEnvelope(payload: SignedWriteEnvelope, key: PrivateKey): SignedAgen
 /** Pure offline signer. Explicit clock/nonce overrides support reproducible vectors. */
 export function signAgentRequest(action: SignedWriteAction, body: Record<string, unknown>, request: RequestBinding, key: PrivateKey, options: EnvelopeOptions = {}): SignedAgentRequest {
   return signEnvelope(buildEnvelope(action, body, request, options), key);
+}
+
+/** Internal origination signer: fixed action and route; agent-call stays agent-only. */
+export function signObjectMintRequest(body: Record<string, unknown>, key: PrivateKey): SignedAgentRequest<"object.mint"> {
+  const base = buildEnvelope("agent.create", body, {method: "POST", path: "/api/v1/objects/mint"}, {});
+  return signEnvelope({...base, action: "object.mint"}, key);
 }
 
 /** Human-supervised vault boundary: validate before key access; no HTTP or writes. */
