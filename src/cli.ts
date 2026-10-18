@@ -25,6 +25,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts payment-inspect
   bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [--max-fee <sats>] [--] [note]
+  bun src/cli.ts agent-call <agent.action> <POST|PUT|DELETE> <path> '<body-json>'
   bun src/cli.ts fund-request <sats>
   bun src/cli.ts kill
   bun src/cli.ts sweep <p2pkh-address>
@@ -57,6 +58,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
 Send --max-fee: optional nonnegative safe integer, decimal digits only; actual miner fee ceiling.
 Use -- before literal note tokens beginning with -. No preview or automatic retry.
 The LLM never sees the key. Policy lives in the signer.
+agent-call is human-only: prints an offline signed Gryd envelope; never sends it.
 allow, sweep, split, fund-request, allowance-*, policy-inspect, and policy-issue are human-only (not MCP tools).
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
@@ -100,6 +102,15 @@ async function main() {
       console.log(`Vault: ${root}`);
       console.log("Fund this address. Do not print or copy the key.");
       console.log("Allowlist is empty. Human next: bun src/cli.ts allow <p2pkh-address>");
+      break;
+    }
+    case "agent-call": {
+      if (!a || !b || rest.length !== 2) die("Usage: agent-call <agent.action> <POST|PUT|DELETE> <path> '<body-json>' (offline signing only)");
+      const { signVaultAgentRequest } = await import("./gryd-agent");
+      let body: Record<string, unknown>;
+      try { body = JSON.parse(rest[1]!); } catch { die("Body must be valid JSON"); }
+      const signed = signVaultAgentRequest(root, a as import("./gryd-agent").SignedWriteAction, body, { method: b as "POST" | "PUT" | "DELETE", path: rest[0]! });
+      console.log(JSON.stringify(signed, null, 2));
       break;
     }
     case "address":

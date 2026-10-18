@@ -58,6 +58,53 @@ bun src/cli.ts split [piece-sats]
 
 `allow`, `sweep`, `split`, and `fund-request` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. Split turns one fat UTXO into up to 20 even self-outputs so later agent sends are not serialized on a single coin. Split does **not** count against daily/lifetime caps. A **human** deletes `STOP_SPENDING` to resume agent sends. Agents must not.
 
+## Gryd agent envelopes (Phase 1: offline, human-supervised)
+
+```bash
+# Select an existing, disposable UNFUNDED vault explicitly for rehearsal.
+DOGFOOD_WALLET_DIR=/absolute/path/to/disposable-vault \
+  bun src/cli.ts agent-call agent.mine POST /api/v1/agents/mine '{}'
+```
+
+`agent-call <agent.action> <POST|PUT|DELETE> <exact-path> '<body-json>'`
+prints `{ payload, signature, pubkey, address }` JSON. It does **not** call Gryd,
+broadcast a transaction, move funds, install permissions, or expose an MCP tool.
+Human-supervised means an owner invokes this CLI deliberately; there is no
+interactive confirmation or autonomous authorization policy in Phase 1.
+
+Any `agent.*` action in the mirrored protocol `SignedWriteAction` union is
+supported with an arbitrary JSON object body. Unknown/non-agent actions are
+rejected. Supply the exact encoded route path and uppercase method: these are
+signed, never normalized. Bodies must be plain JSON (no undefined, non-finite
+numbers, custom objects or cycles). A fresh UUID and Unix-seconds timestamp are
+generated per call; the network field is omitted as in the web client.
+
+The signature is compact base64 Bitcoin Signed Message using the vault identity
+key, over `Locus Signed Write\n` plus recursively key-sorted JSON. Keys never
+appear in output. `STOP_SPENDING` blocks vault signing; local payment caps and
+BRC-181 spend accounting are **not** an authorization policy for Gryd actions.
+Treat printed envelopes as sensitive, usable authorizations: manually submitting
+one later could authorize remote mutations, including financial actions. Do not
+submit one as part of this offline rehearsal. The backend checks freshness (the
+protocol specifies a 300-second skew window), ownership and route/action rules;
+this slice does not prove live backend acceptance or autonomous transactions.
+
+Library: `src/gryd-agent.ts` exports `signAgentRequest(action, body, { method,
+path }, key, options?)` for explicit keys, and `signVaultAgentRequest(root,
+action, body, { method, path })` for the guarded vault boundary. The pure-key
+helper does not inspect a vault or its killfile. Timestamp/nonce/network options
+on the pure helper support deterministic testing; the CLI offers no overrides.
+
+Frozen canonicalization vectors were executed from
+`packages/locus-protocol/src/signed-write.ts` in Gryd checkout
+`211194c3ab177cefb2b359e27a5ceeaad4c012bf`; the fixture records its source SHA-256.
+They cover nested key sorting (including numeric-looking keys), arrays, Unicode,
+escaping, numeric formatting, encoded paths, all three methods, and optional
+network. Signatures use public synthetic scalar 1, **not a vault key**.
+Regenerate deliberately with `bun scripts/gryd-agent-vectors.ts <grid-repo-root>`;
+review source hash/action-list changes rather than blindly accepting drift.
+Neither tests nor the packaged CLI require a Gryd checkout.
+
 ## Direct-send fee ceiling
 
 `send <to-address> <sats> --max-fee <fee-sats> [note]` optionally bounds the

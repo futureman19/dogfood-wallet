@@ -1,0 +1,126 @@
+{
+  "sourcePath": "packages/locus-protocol/src/signed-write.ts",
+  "sourceSha256": "681dec097f068c276e77447bd1144bed01b959df50ab7ea4c2feb548e793bbe9",
+  "agentActions": [
+    "agent.create",
+    "agent.update",
+    "agent.fund",
+    "agent.withdraw",
+    "agent.authorize",
+    "agent.mine",
+    "agent.transactions",
+    "agent.conversation",
+    "agent.runs",
+    "agent.invoke",
+    "agent.invoke_agent",
+    "agent.brain.read",
+    "agent.brain.update",
+    "agent.list",
+    "agent.cancel_listing",
+    "agent.buy",
+    "agent.lock",
+    "agent.unlock",
+    "agent.capabilities.read",
+    "agent.capability.grant",
+    "agent.capability.revoke",
+    "agent.action.dry_run",
+    "agent.action.execute",
+    "agent.actions.read",
+    "agent.schedule.create",
+    "agent.schedule.list",
+    "agent.schedule.update",
+    "agent.schedule.delete"
+  ],
+  "vectors": [
+    {
+      "payload": {
+        "mode": "signed_write",
+        "action": "agent.mine",
+        "method": "POST",
+        "path": "/api/v1/agents/mine",
+        "body": {},
+        "timestamp": 1700000000,
+        "nonce": "00000000-0000-4000-8000-000000000001"
+      },
+      "message": "Locus Signed Write\n{\"action\":\"agent.mine\",\"body\":{},\"method\":\"POST\",\"mode\":\"signed_write\",\"nonce\":\"00000000-0000-4000-8000-000000000001\",\"path\":\"/api/v1/agents/mine\",\"timestamp\":1700000000}",
+      "utf8Hex": "4c6f637573205369676e65642057726974650a7b22616374696f6e223a226167656e742e6d696e65222c22626f6479223a7b7d2c226d6574686f64223a22504f5354222c226d6f6465223a227369676e65645f7772697465222c226e6f6e6365223a2230303030303030302d303030302d343030302d383030302d303030303030303030303031222c2270617468223a222f6170692f76312f6167656e74732f6d696e65222c2274696d657374616d70223a313730303030303030307d",
+      "signature": "IFbiGO+YeQB6PO/uQ8sVDmKLCWEv2rLlezSZrU9KxjClfVDD3kAh4L4yDw0+p6mAgclgTLFMBd4PvCqQc0yUFZk=",
+      "pubkey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "address": "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+    },
+    {
+      "payload": {
+        "mode": "signed_write",
+        "action": "agent.update",
+        "method": "PUT",
+        "path": "/api/v1/agents/a%2Fb",
+        "body": {
+          "z": null,
+          "name": "Café 🌍\n\"hi\"",
+          "nested": {
+            "z": [
+              true,
+              false,
+              null,
+              0,
+              1e-7
+            ],
+            "a": {
+              "2": 2,
+              "10": 10
+            }
+          }
+        },
+        "timestamp": 1700000000,
+        "nonce": "00000000-0000-4000-8000-000000000001"
+      },
+      "message": "Locus Signed Write\n{\"action\":\"agent.update\",\"body\":{\"name\":\"Café 🌍\\n\\\"hi\\\"\",\"nested\":{\"a\":{\"10\":10,\"2\":2},\"z\":[true,false,null,0,1e-7]},\"z\":null},\"method\":\"PUT\",\"mode\":\"signed_write\",\"nonce\":\"00000000-0000-4000-8000-000000000001\",\"path\":\"/api/v1/agents/a%2Fb\",\"timestamp\":1700000000}",
+      "utf8Hex": "4c6f637573205369676e65642057726974650a7b22616374696f6e223a226167656e742e757064617465222c22626f6479223a7b226e616d65223a22436166c3a920f09f8c8d5c6e5c2268695c22222c226e6573746564223a7b2261223a7b223130223a31302c2232223a327d2c227a223a5b747275652c66616c73652c6e756c6c2c302c31652d375d7d2c227a223a6e756c6c7d2c226d6574686f64223a22505554222c226d6f6465223a227369676e65645f7772697465222c226e6f6e6365223a2230303030303030302d303030302d343030302d383030302d303030303030303030303031222c2270617468223a222f6170692f76312f6167656e74732f6125324662222c2274696d657374616d70223a313730303030303030307d",
+      "signature": "IMfhDp6s4ZRqbQCdzhnLvFRjYo9PAgpX2+gSvDqqhRWvCzkSOUz0VffmvPP4BFhdOX6fzEY+ydTrnsTdSmDAm3Y=",
+      "pubkey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "address": "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+    },
+    {
+      "payload": {
+        "mode": "signed_write",
+        "action": "agent.action.dry_run",
+        "method": "POST",
+        "path": "/api/v1/agents/a/actions/dry-run",
+        "body": {
+          "requestId": "fixture",
+          "action": "area.sense",
+          "target": {
+            "lng": -122.4,
+            "lat": 37.7,
+            "radiusM": 100
+          },
+          "params": {}
+        },
+        "timestamp": 1700000000,
+        "nonce": "00000000-0000-4000-8000-000000000001"
+      },
+      "message": "Locus Signed Write\n{\"action\":\"agent.action.dry_run\",\"body\":{\"action\":\"area.sense\",\"params\":{},\"requestId\":\"fixture\",\"target\":{\"lat\":37.7,\"lng\":-122.4,\"radiusM\":100}},\"method\":\"POST\",\"mode\":\"signed_write\",\"nonce\":\"00000000-0000-4000-8000-000000000001\",\"path\":\"/api/v1/agents/a/actions/dry-run\",\"timestamp\":1700000000}",
+      "utf8Hex": "4c6f637573205369676e65642057726974650a7b22616374696f6e223a226167656e742e616374696f6e2e6472795f72756e222c22626f6479223a7b22616374696f6e223a22617265612e73656e7365222c22706172616d73223a7b7d2c22726571756573744964223a2266697874757265222c22746172676574223a7b226c6174223a33372e372c226c6e67223a2d3132322e342c227261646975734d223a3130307d7d2c226d6574686f64223a22504f5354222c226d6f6465223a227369676e65645f7772697465222c226e6f6e6365223a2230303030303030302d303030302d343030302d383030302d303030303030303030303031222c2270617468223a222f6170692f76312f6167656e74732f612f616374696f6e732f6472792d72756e222c2274696d657374616d70223a313730303030303030307d",
+      "signature": "H1sJzCpEXTVKIUpLHF45wadQuxIF1ST9wjk/1DkWOD8pd5M1eK5kxCps6HtuiKC4mnWshLUsqyhcQ0YcBKYtmG4=",
+      "pubkey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "address": "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+    },
+    {
+      "payload": {
+        "mode": "signed_write",
+        "action": "agent.schedule.delete",
+        "method": "DELETE",
+        "path": "/api/v1/agents/a/schedules/s",
+        "body": {},
+        "network": "testnet",
+        "timestamp": 1700000000,
+        "nonce": "00000000-0000-4000-8000-000000000001"
+      },
+      "message": "Locus Signed Write\n{\"action\":\"agent.schedule.delete\",\"body\":{},\"method\":\"DELETE\",\"mode\":\"signed_write\",\"network\":\"testnet\",\"nonce\":\"00000000-0000-4000-8000-000000000001\",\"path\":\"/api/v1/agents/a/schedules/s\",\"timestamp\":1700000000}",
+      "utf8Hex": "4c6f637573205369676e65642057726974650a7b22616374696f6e223a226167656e742e7363686564756c652e64656c657465222c22626f6479223a7b7d2c226d6574686f64223a2244454c455445222c226d6f6465223a227369676e65645f7772697465222c226e6574776f726b223a22746573746e6574222c226e6f6e6365223a2230303030303030302d303030302d343030302d383030302d303030303030303030303031222c2270617468223a222f6170692f76312f6167656e74732f612f7363686564756c65732f73222c2274696d657374616d70223a313730303030303030307d",
+      "signature": "IFnTc4bpQcTSawMrHBAZAWmDcngeFHhsFcka3d/J/2zLUIz9peNlAQjU3BycWxJnPS60Suh0iBjy8pFkQ8B2Xds=",
+      "pubkey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "address": "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+    }
+  ]
+}

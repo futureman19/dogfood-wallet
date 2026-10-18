@@ -64,6 +64,7 @@
     "src/facilitator.ts",
     "src/fee-delegator.ts",
     "src/fund-request.ts",
+    "src/gryd-agent.ts",
     "src/http.ts",
     "src/mcp.ts",
     "src/merchant-bsv.ts",
