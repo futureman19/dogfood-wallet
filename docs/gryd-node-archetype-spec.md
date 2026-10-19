@@ -91,12 +91,30 @@ The supported ownership-script grammar is bounded and closed. Origin (mint)
 outputs: vout 0, value exactly one satoshi, scriptPubKey = an optional
 ordinal inscription envelope (`OP_FALSE OP_IF "ord" … OP_ENDIF`) followed by
 the canonical P2PKH locking script (`OP_DUP OP_HASH160` + 20 bytes +
-`OP_EQUALVERIFY OP_CHECKSIG`); the envelope, when present, must carry an
-unambiguous supported Locus payload. This envelope-prefixed form is the
+`OP_EQUALVERIFY OP_CHECKSIG`); the envelope, when present, must carry one of
+the two closed payload grammars defined below. This envelope-prefixed form is the
 production 1Sat mint shape (evidence: oracle mint
 77ff07a178a96f7108cbf44604c0b18989a1c37e3bf17216bd9d0e36261f43a5 vout0, one
 satoshi, envelope prefix + P2PKH suffix) and MUST be accepted; any other
-script form is unsupported and rejected. Transfer-chain tips after the mint
+script form is unsupported and rejected.
+
+Envelope payload grammar (a) — Locus protocol payload: the versioned
+protocol envelope in docs/PIN_SPEC.md (`p:"locus"`, supported version and
+operation). Grammar (b) — agent-metadata origin payload v1: a plain UTF-8
+JSON object with exactly five keys and no others: `name` (string, 1–64
+chars, no control characters), `class` (string, v1 const `"AGENT"`),
+`rarity` (string, v1 enum `{"common"}`), `lat` (finite JSON number,
+−90…90 inclusive), `lng` (finite JSON number, −180…180 inclusive).
+Duplicate keys, extra keys, other classes or rarities, out-of-range or
+non-finite coordinates, and non-object payloads all reject. Production
+evidence: object:23/24/25 mint inscriptions all conform exactly
+(`{"name","class":"AGENT","rarity":"common","lat","lng"}`). Ownership is
+derived exclusively from the verified locking script plus fresh chain
+evidence; the envelope payload is metadata and is never ownership
+evidence. New classes or rarities require a spec amendment and a
+validator version bump — the grammar stays closed between versions.
+
+Transfer-chain tips after the mint
 are plain canonical P2PKH only, per the bounded input-zero → one-sat
 output-zero convention in docs/PIN_SPEC.md; inscription-wrapped scripts
 remain excluded there. Acceptable evidence is raw transactions whose txids
