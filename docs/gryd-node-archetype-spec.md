@@ -87,6 +87,24 @@ verified tip and chain observation time/block evidence. A UTXO/indexer response
 is not independent SPV and cannot prevent a simultaneous transfer. Mark the
 binding unknown/stale if chain reads fail; do not sponsor in that condition.
 
+The supported ownership-script grammar is bounded and closed. Origin (mint)
+outputs: vout 0, value exactly one satoshi, scriptPubKey = an optional
+ordinal inscription envelope (`OP_FALSE OP_IF "ord" … OP_ENDIF`) followed by
+the canonical P2PKH locking script (`OP_DUP OP_HASH160` + 20 bytes +
+`OP_EQUALVERIFY OP_CHECKSIG`); the envelope, when present, must carry an
+unambiguous supported Locus payload. This envelope-prefixed form is the
+production 1Sat mint shape (evidence: oracle mint
+77ff07a178a96f7108cbf44604c0b18989a1c37e3bf17216bd9d0e36261f43a5 vout0, one
+satoshi, envelope prefix + P2PKH suffix) and MUST be accepted; any other
+script form is unsupported and rejected. Transfer-chain tips after the mint
+are plain canonical P2PKH only, per the bounded input-zero → one-sat
+output-zero convention in docs/PIN_SPEC.md; inscription-wrapped scripts
+remain excluded there. Acceptable evidence is raw transactions whose txids
+hash-check against their bytes plus fresh unspent proof of the current tip,
+sourced from chain providers — never provider address labels or database
+rows. Ambiguous, unsupported, or unavailable evidence rejects; no legacy
+repair or migration. (Grammar defined 2026-10-18 at Phase A preflight.)
+
 A transfer invalidates the old node's ability to publish against that pin. It
 does **not** transfer the old author's identity/history or rewrite old signatures.
 The new owner creates a new node ID for that origin. Old records remain readable
