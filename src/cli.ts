@@ -43,6 +43,9 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts x402-proof <X402-Challenge-header> <rawtx-hex> [method] [path]
   bun src/cli.ts x402-delegate <X402-Challenge-header> [method] [path] [--broadcast]
   bun src/cli.ts evm-address
+  bun src/cli.ts doge-address
+  bun src/cli.ts doge-balance
+  bun src/cli.ts doge-send <destination> <koinu>  # owner-only; broadcasts by default
   bun src/cli.ts btc-address
   bun src/cli.ts btc-balance
   bun src/cli.ts btc-send <destination> <sats>
@@ -114,6 +117,20 @@ async function main() {
     return;
   }
   switch (cmd) {
+    case "doge-address":
+    case "doge-balance": {
+      if(a!==undefined)die(`Usage: ${cmd}`);
+      const {dogeAddress,dogeBalance}=await import('./doge');
+      const address=dogeAddress(loadVault(root).key);
+      console.log(cmd==='doge-address'?address:JSON.stringify({address,...await dogeBalance(address)},null,2));
+      break;
+    }
+    case "doge-send": {
+      if(!a||!b||rest.length||! /^[0-9]+$/.test(b)||!Number.isSafeInteger(Number(b))||Number(b)<=0)die('Usage: doge-send <destination> <koinu>; positive decimal integer koinu only');
+      const {sendDoge}=await import('./doge');
+      console.log(JSON.stringify(await sendDoge({root,to:a,koinu:Number(b)}),null,2));
+      break;
+    }
     case "btc-address":
     case "btc-balance": {
       if(a!==undefined)die(`Usage: ${cmd}`);

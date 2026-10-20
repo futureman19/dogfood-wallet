@@ -19,7 +19,7 @@ export function btcDestination(address:string):{address:string;script:Uint8Array
   } catch { throw Error('BAD_ADDRESS: invalid mainnet BTC address/checksum'); }
 }
 export function canonicalBtcDest(address:string):string { return 'btc:'+btcDestination(address).address; }
-function compactSize(n:number):number { return n<253?1:n<=0xffff?3:n<=0xffffffff?5:9; }
+import {compactSize} from './utxo-treasury';
 /** Conservative low-S DER P2WPKH weight: stripped input 41 bytes, witness <=108.
  * Includes marker/flag, CompactSize input/output counts and script lengths. */
 export function p2wpkhVsize(inputs:number,outputScriptLengths:number[]):number {

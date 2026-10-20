@@ -1,6 +1,5 @@
 import {Transaction} from '@scure/btc-signer';
-import {closeSync,fsyncSync,mkdirSync,openSync,writeFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {treasuryEvidence} from './utxo-treasury';
 import {btcKey,btcAddress,btcDestination,canonicalBtcDest,p2wpkhVsize,BTC_DOMAIN} from './btc-address';
 import {loadVault,loadUsage,vaultPaths} from './vault';
 import {evaluateBtcSend} from './policy';
@@ -38,12 +37,6 @@ export async function btcBalance(address:string,fetchFn:typeof fetch=globalThis.
   const rows=await utxos(btcDestination(address).address,fetchFn);let confirmed=0,unconfirmed=0;
   for(const r of rows){if(r.status.confirmed)confirmed+=r.value;else unconfirmed+=r.value;sats(confirmed+unconfirmed);}
   return {confirmed,unconfirmed};
-}
-function evidence(root:string,id:string,value:unknown) {
-  const dir=join(root,'btc-sends');mkdirSync(dir,{recursive:true,mode:0o700});
-  const fd=openSync(join(dir,id+'.json'),'wx',0o600);
-  try{writeFileSync(fd,JSON.stringify(value)+'\n');fsyncSync(fd);}finally{closeSync(fd);}
-  if(process.platform!=='win32'){const d=openSync(dir,'r');try{fsyncSync(d);}finally{closeSync(d);}}
 }
 export type BtcSendOptions={root:string;to:string;sats:number;fetchFn?:typeof fetch};
 /** Human-only. Signed exposure is always reserved and persisted; never retries. */
@@ -97,7 +90,7 @@ export async function sendBtc(options:BtcSendOptions):Promise<{txid:string;amoun
     tx.finalize();
     if(tx.fee!==BigInt(fee)||fee<Math.ceil(rate*tx.vsize))throw Error('BTC signed fee/weight mismatch; hold retained');
     const rawTx=tx.hex,txid=tx.id;
-    evidence(options.root,guard.id,{version:1,operation:'btc-send',asset:'btc',paymentId:guard.id,derivation:BTC_DOMAIN,address,to:destination.address,amount:options.sats,fee,rateSatPerVbyte:rate,vsize:tx.vsize,inputs:selected,change,txid,rawTx});
+    treasuryEvidence(options.root,'btc',guard.id,{version:1,operation:'btc-send',asset:'btc',paymentId:guard.id,derivation:BTC_DOMAIN,address,to:destination.address,amount:options.sats,fee,rateSatPerVbyte:rate,vsize:tx.vsize,inputs:selected,change,txid,rawTx});
     await fresh();
     const ack=(await request('/tx',fetchFn,rawTx)).trim();
     if(ack!==txid)throw Error('Ambiguous BTC broadcast acknowledgement; HOLD retained, never retry');

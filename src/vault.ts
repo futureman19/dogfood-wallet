@@ -10,6 +10,7 @@ import {
   usageFromLog,
   parseGrydPolicy,
   parseBtcPolicy,
+  parseDogePolicy,
   type BridgePolicy,
   type EvmAssetPolicy,
   type Policy,
@@ -173,6 +174,7 @@ export function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
     bridge: parseBridgeBlock(parsed.bridge),
     gryd: parseGrydPolicy(parsed.gryd),
     btc: parseBtcPolicy(parsed.btc),
+    doge: parseDogePolicy(parsed.doge),
   };
 }
 

@@ -16,6 +16,11 @@ Open source (MIT). Not a hosted wallet. Not a consumer portfolio app. No revenue
 
 ## Architecture
 
+DOGE owner treasury commands: `doge-address`, `doge-balance` and
+`doge-send <destination> <koinu>` (broadcast by default). Sending is disabled
+until its separate policy is configured; no MCP send. See
+[DOGE derivation, policy and safety](docs/doge-adapter.md).
+
 BTC treasury receive/hold and **human-only send** are also available via
 `btc-address`, `btc-balance` and `btc-send <destination> <sats>`. BTC is disabled
 for sending until an owner configures its separate policy; it is not an x402,

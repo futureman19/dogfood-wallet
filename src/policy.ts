@@ -1,4 +1,5 @@
 import {canonicalBtcDest} from './btc-address';
+import {canonicalDogeDest} from './doge-address';
 export const DEFAULT_MAX_SATS = 10_000;
 export const DEFAULT_MAX_SATS_PER_DAY = 50_000;
 
@@ -25,6 +26,7 @@ export function evaluateGrydBuy(policy: GrydPolicy, killfileOn: boolean, amount:
 
 export type Policy = {
   btc?: BtcPolicy;
+  doge?: DogePolicy;
   gryd?: GrydPolicy;
   maxSatsPerTx: number;
   maxSatsPerDay: number | null;
@@ -72,32 +74,48 @@ export type BtcPolicy = Omit<EvmAssetPolicy,'allowlist'> & {
   /** Canonical btc:-prefixed destinations; base58 case is significant. */
   allowlist:string[]|null;
 };
-export function parseBtcPolicy(raw:unknown):BtcPolicy|undefined {
+export function parseBtcPolicy(raw:unknown):BtcPolicy|undefined {return parseTreasuryPolicy(raw,'btc',canonicalBtcDest);}
+function parseTreasuryPolicy(raw:unknown,rail:string,canonical:(address:string)=>string,feeField='maxFeeSats'):BtcPolicy|undefined {
   if(raw===undefined)return undefined;
-  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('Invalid btc policy block');
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('Invalid '+rail+' policy block');
   const p=raw as Record<string,unknown>;
-  for(const name of ['maxPerTx','maxPerDay','maxLifetime','maxFeeSats']) {
+  for(const name of ['maxPerTx','maxPerDay','maxLifetime',feeField]) {
     if((name==='maxPerDay'||name==='maxLifetime')&&p[name]===null)continue;
-    if(typeof p[name]!=='number'||!Number.isSafeInteger(p[name])||p[name]<0)throw Error('Invalid btc.'+name);
+    if(typeof p[name]!=='number'||!Number.isSafeInteger(p[name])||p[name]<0)throw Error('Invalid '+rail+'.'+name);
   }
-  if(p.allowlist!==null&&(!Array.isArray(p.allowlist)||!p.allowlist.every(a=>typeof a==='string')))throw Error('Invalid btc.allowlist');
+  if(p.allowlist!==null&&(!Array.isArray(p.allowlist)||!p.allowlist.every(a=>typeof a==='string')))throw Error('Invalid '+rail+'.allowlist');
   const allowlist=p.allowlist===null?null:(p.allowlist as string[]).map(a=>{
-    if(!a.startsWith('btc:')||canonicalBtcDest(a.slice(4))!==a)throw Error('Invalid btc.allowlist: canonical btc: destination required');
+    if(!a.startsWith(rail+':')||canonical(a.slice(rail.length+1))!==a)throw Error('Invalid '+rail+'.allowlist: canonical prefixed destination required');
     return a;
   });
-  return {maxPerTx:p.maxPerTx as number,maxPerDay:p.maxPerDay as number|null,maxLifetime:p.maxLifetime as number|null,maxFeeSats:p.maxFeeSats as number,allowlist};
+  return {maxPerTx:p.maxPerTx as number,maxPerDay:p.maxPerDay as number|null,maxLifetime:p.maxLifetime as number|null,maxFeeSats:p[feeField] as number,allowlist};
 }
 export function evaluateBtcSend(pocket:BtcPolicy|undefined,killfileOn:boolean,amount:number,to:string,usage:Usage={spentToday:0,spentLifetime:0}):Decision {
-  if(!pocket)return {ok:false,code:'DISABLED',message:'REJECTED: no btc policy configured.'};
+ return evaluateTreasurySend(pocket,killfileOn,amount,to,usage,'BTC',canonicalBtcDest);
+}
+function evaluateTreasurySend(pocket:EvmAssetPolicy|undefined,killfileOn:boolean,amount:number,to:string,usage:Usage,rail:string,canonical:(address:string)=>string):Decision {
+  if(!pocket)return {ok:false,code:'DISABLED',message:'REJECTED: no '+rail+' policy configured.'};
   if(killfileOn)return {ok:false,code:'KILL',message:'REJECTED: STOP_SPENDING is on.'};
-  if(!Number.isSafeInteger(amount)||amount<=0)return {ok:false,code:'BAD_AMOUNT',message:'REJECTED: BTC amount must be positive safe integer sats.'};
-  let address:string;try{address=canonicalBtcDest(to);}catch{return {ok:false,code:'BAD_ADDRESS',message:'REJECTED: Invalid mainnet BTC destination.'};}
-  if(pocket.allowlist!==null&&!pocket.allowlist.includes(address))return {ok:false,code:'ALLOWLIST',message:'REJECTED: BTC destination not on allowlist.'};
-  if(amount>pocket.maxPerTx)return {ok:false,code:'CAP',message:'REJECTED: Exceeds BTC per-tx cap.'};
-  if(pocket.maxPerDay!==null&&usage.spentToday>pocket.maxPerDay-amount)return {ok:false,code:'DAY',message:'REJECTED: Exceeds BTC daily cap.'};
-  if(pocket.maxLifetime!==null&&usage.spentLifetime>pocket.maxLifetime-amount)return {ok:false,code:'LIFETIME',message:'REJECTED: Exceeds BTC lifetime cap.'};
+  if(!Number.isSafeInteger(amount)||amount<=0)return {ok:false,code:'BAD_AMOUNT',message:'REJECTED: native amount must be a positive safe integer.'};
+  let address:string;try{address=canonical(to);}catch{return {ok:false,code:'BAD_ADDRESS',message:'REJECTED: Invalid mainnet treasury destination.'};}
+  if(pocket.allowlist!==null&&!pocket.allowlist.includes(address))return {ok:false,code:'ALLOWLIST',message:'REJECTED: treasury destination not on allowlist.'};
+  if(amount>pocket.maxPerTx)return {ok:false,code:'CAP',message:'REJECTED: Exceeds treasury per-tx cap.'};
+  if(pocket.maxPerDay!==null&&usage.spentToday>pocket.maxPerDay-amount)return {ok:false,code:'DAY',message:'REJECTED: Exceeds treasury daily cap.'};
+  if(pocket.maxLifetime!==null&&usage.spentLifetime>pocket.maxLifetime-amount)return {ok:false,code:'LIFETIME',message:'REJECTED: Exceeds treasury lifetime cap.'};
   return {ok:true};
 }
+export type DogePolicy = Omit<BtcPolicy,'maxFeeSats'> & {maxFeeKoinu:number};
+export function parseDogePolicy(raw:unknown):DogePolicy|undefined {
+  if(raw===undefined)return undefined;
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('Invalid doge policy block');
+  const p=raw as Record<string,unknown>;
+  const parsed=parseTreasuryPolicy(p,'doge',canonicalDogeDest,'maxFeeKoinu')!;
+  const {maxFeeSats,...rest}=parsed;return {...rest,maxFeeKoinu:maxFeeSats};
+}
+export function evaluateDogeSend(pocket:DogePolicy|undefined,killfileOn:boolean,amount:number,to:string,usage:Usage={spentToday:0,spentLifetime:0}):Decision {
+ return evaluateTreasurySend(pocket,killfileOn,amount,to,usage,'DOGE',canonicalDogeDest);
+}
+
 
 // Bridge policy: BSV<->USDC conversions between our own vault and our own
 // pocket. Absent block = DISABLED (fail-closed). Amounts in sats.
@@ -374,6 +392,7 @@ export function utcDay(d: Date): string {
 // carry no client fee. Local ordinary/bridge policy scopes remain separate.
 const BRC181_SCOPES: Record<string, string[]> = {
   "brc181-btc": ["btc"],
+  "brc181-doge": ["doge"],
   "brc181-bsv": ["bsv", "bridge-bsv"],
   "brc181-usdc-base": ["usdc-base"],
   "brc181-usdc-solana": ["usdc-solana"],
@@ -395,7 +414,7 @@ export function usageFromLog(lines: string[], now: Date = new Date(), asset = "b
       } else if (!(BRC181_SCOPES[asset] ?? [asset]).includes(rowAsset)) continue;
       let amount =
         typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
-      if ((asset === "brc181-bsv" || asset === "brc181-btc") && typeof row.fee === "number" && Number.isSafeInteger(row.fee) && row.fee > 0) amount += row.fee;
+      if ((asset === "brc181-bsv" || asset === "brc181-btc" || asset === "brc181-doge") && typeof row.fee === "number" && Number.isSafeInteger(row.fee) && row.fee > 0) amount += row.fee;
       spentLifetime += amount;
       if (typeof row.t === "string") {
         const day = asset === "gryd" ? (Number.isFinite(Date.parse(row.t)) ? utcDay(new Date(row.t)) : "") : row.t.slice(0, 10);

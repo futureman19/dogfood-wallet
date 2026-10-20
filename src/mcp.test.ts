@@ -29,6 +29,14 @@ describe("mcp", () => {
       for(const name of ['btc-send','btc_send','sendBtc'])expect((await client.callTool({name,arguments:{to:'bc1qinvalid',sats:1000}})).isError).toBe(true);
     }finally{await client.close();await server.close();rmSync(root,{recursive:true,force:true});}
   });
+  test('DOGE send is absent and rejected by real runtime MCP',async()=>{
+    const root=mkdtempSync(join(tmpdir(),'doge-mcp-'));
+    const server=createServer(root),client=new Client({name:'doge-isolation',version:'1'});
+    try{const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(b);await client.connect(a);
+      expect((await client.listTools()).tools.some(t=>/doge.*send|send.*doge/i.test(t.name))).toBe(false);
+      for(const name of ['doge-send','doge_send','sendDoge'])expect((await client.callTool({name,arguments:{to:'bc1qinvalid',koinu:1000}})).isError).toBe(true);
+    }finally{await client.close();await server.close();rmSync(root,{recursive:true,force:true});}
+  });
   test("createServer does not throw and does not embed a WIF in its name", () => {
     const root = mkdtempSync(join(tmpdir(), "dogfood-mcp-"));
     try {
