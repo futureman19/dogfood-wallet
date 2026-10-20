@@ -1,5 +1,6 @@
 // Explicit opt-in integration: registry downloads, never publication or global install.
 import assert from "node:assert/strict";
+import { isExcludedPackagePath } from "./package-paths";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -29,7 +30,7 @@ try {
   const paths = pack.files.map((f: any) => f.path).sort();
   assert(Array.isArray(manifest.files), "package must have an explicit files allowlist");
   assert.deepEqual(paths, [...new Set([...manifest.files, "package.json"])].sort(), "Unexpected or missing packed files");
-  assert(!paths.some((p: string) => /(?:test|fixture|site\/|deploy|verification|\.env|\.key|\.enc|\.jsonl|node_modules|\.git)/i.test(p)), "Excluded/private inventory path");
+  assert(!paths.some(isExcludedPackagePath), "Excluded/private inventory path");
   writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "dogfood-package-consumer", private: true, dependencies: { "dogfood-wallet": `file:${join(scratch, pack.filename).replaceAll("\\", "/")}` } }));
   run([process.execPath, "install", "--ignore-scripts"], consumer);
   const installed = join(consumer, "node_modules", "dogfood-wallet");
@@ -51,6 +52,9 @@ try {
   assert(cliRun("status").includes("Allowlist: (empty)"));
   assert.match(cliRun("evm-address"), /^0x[0-9a-fA-F]{40}$/);
   assert.match(cliRun("sol-address"), /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+  // Receive-only derivation exercises the installed treasury dependencies offline.
+  assert.match(cliRun("btc-address"), /^bc1q[ac-hj-np-z02-9]{38}$/);
+  assert.match(cliRun("doge-address"), /^D[1-9A-HJ-NP-Za-km-z]{33}$/);
   // Run client and optional imports from INSIDE the installed package: no repo resolution.
   const smoke = join(installed, "package-smoke.ts");
   const modules = paths.filter((p: string) => p.startsWith("src/") && !["src/cli.ts", "src/merchant-main.ts"].includes(p));
@@ -102,7 +106,7 @@ try {
   const merchant = Bun.spawnSync([process.execPath, ...args, join(installed, "src/merchant-main.ts")], { cwd: unrelated, env, timeout: 10000 });
   assert.equal(merchant.exitCode, 1);
   assert(merchant.stderr.toString().includes("DOGFOOD_MERCHANT_PAYTO is required"));
-  console.log(JSON.stringify({ package: pack.id, entryCount: pack.entryCount, size: pack.size, unpackedSize: pack.unpackedSize, files: paths, launcher, cli: "absolute installed entrypoint init/address/status/evm-address/sol-address; merchant missing-payee rejection", smoke: smokeResult }, null, 2));
+  console.log(JSON.stringify({ package: pack.id, entryCount: pack.entryCount, size: pack.size, unpackedSize: pack.unpackedSize, files: paths, launcher, cli: "absolute installed entrypoint init/address/status/evm-address/sol-address/btc-address/doge-address; merchant missing-payee rejection", smoke: smokeResult }, null, 2));
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
