@@ -106,6 +106,19 @@ Regenerate deliberately with `bun scripts/gryd-agent-vectors.ts <grid-repo-root>
 review source hash/action-list changes rather than blindly accepting drift.
 Neither tests nor the packaged CLI require a Gryd checkout.
 
+## Gryd agent deposits (owner-only)
+
+`bun src/cli.ts agent-deposit <agent-id> <sats> [--no-broadcast]` pays the fixed
+Gryd Fund from main-vault coins, binds the agent in a single-push OP_RETURN and
+returns `{txid,vout:0}` plus the `agent-post agent.fund` route/body input.
+**Default: sign and broadcast. `--no-broadcast`: sign, print spendable rawTx and
+future claim, and RETAIN the payment hold — not an unsigned preview.**
+Ordinary local and installed BRC-181 gates apply; empty allowlists deny.
+No Gryd POST or MCP tool is added. The existing `agent-post agent.fund` later
+checks and accounts the amount independently again; do not assume one-step
+crediting or single-charge accounting across both commands.
+See [deposit safety, recovery and pinned verifier provenance](docs/gryd-deposit.md).
+
 ## Gryd purchases (Phase 2: human-only)
 
 ```bash

@@ -31,7 +31,7 @@ function isFeePolicyReject(message: string): boolean {
   return /fee/i.test(message) && /too low|insufficient|465|461/i.test(message);
 }
 
-async function arcBroadcast(raw: string, fetchFn: typeof fetch): Promise<{ txid: string }> {
+export async function arcBroadcast(raw: string, fetchFn: typeof fetch): Promise<{ txid: string }> {
   const response = await fetchFn(ARC_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

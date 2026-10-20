@@ -25,6 +25,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts payment-inspect
   bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [--max-fee <sats>] [--] [note]
+  bun src/cli.ts agent-deposit <agent-id> <sats> [--no-broadcast]
   bun src/cli.ts agent-post <agent.action> '<body-json: {route,body}>' [--no-post]
   bun src/cli.ts agent-call <agent.action> <POST|PUT|DELETE> <path> '<body-json>'
   bun src/cli.ts agent-buy <listing-outpoint> <max-price-sats> [--no-broadcast]
@@ -66,6 +67,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
 Send --max-fee: optional nonnegative safe integer, decimal digits only; actual miner fee ceiling.
 Use -- before literal note tokens beginning with -. No preview or automatic retry.
 The LLM never sees the key. Policy lives in the signer.
+agent-deposit is human-only: broadcasts by default; --no-broadcast SIGNS rawTx and RETAINS a payment hold.
 agent-mint and agent-register are human-only: broadcast / metadata POST by default.
 --no-broadcast is unsigned; --no-post prints a usable signed authorization, not a receipt.
 agent-call is human-only: prints an offline signed Gryd envelope; never sends it.
@@ -172,6 +174,15 @@ async function main() {
       const { buyAgent } = await import("./gryd-buy");
       const result = await buyAgent({ root, listingOutpoint: a, maxPriceSats: Number(b), noBroadcast: rest[0] === "--no-broadcast" });
       console.log(JSON.stringify(result, null, 2));
+      break;
+    }
+    case "agent-deposit": {
+      if (!a || !b || !/^[0-9]+$/.test(b) || !Number.isSafeInteger(Number(b)) || Number(b) <= 0
+        || rest.length > 1 || (rest.length === 1 && rest[0] !== "--no-broadcast")) {
+        die("Usage: agent-deposit <agent-id> <sats> [--no-broadcast]; positive decimal integer sats only");
+      }
+      const { depositAgent } = await import("./gryd-deposit");
+      console.log(JSON.stringify(await depositAgent({root, agentId:a, sats:Number(b), noBroadcast:rest[0] === "--no-broadcast"}), null, 2));
       break;
     }
     case "agent-post": {

@@ -70,6 +70,8 @@
     "src/gryd-buy.ts",
     "src/gryd-listings.ts",
     "src/gryd-mint.ts",
+    "src/gryd-deposit.ts",
+    "docs/gryd-deposit.md",
     "src/gryd-post.ts",
     "src/gryd-ordlock-constants.ts",
     "src/http.ts",

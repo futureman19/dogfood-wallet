@@ -66,6 +66,9 @@ vault material, tarballs and consumer files are deleted on success or failure.
 Set TEMP/TMP/TMPDIR to private scratch on Windows before running.
 
 Only production modules and reviewed public operating docs/license are shipped.
+The owner-only deposit module `src/gryd-deposit.ts` and its operating contract
+`docs/gryd-deposit.md` are included; the synthetic deposit fixture and tests are
+source-development-only and are not runtime dependencies.
 No production module needs repository test vectors or other bundled data; those
 vectors are development fixtures. Tests, test-support, site, deployment files,
 internal verification records, lockfile and dev scripts are excluded. The installed
