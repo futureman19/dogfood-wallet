@@ -9,6 +9,7 @@ import {
   isValidAddress,
   usageFromLog,
   parseGrydPolicy,
+  parseBtcPolicy,
   type BridgePolicy,
   type EvmAssetPolicy,
   type Policy,
@@ -171,6 +172,7 @@ export function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
     solana: parseEvmBlock(parsed.solana), // same pocket shape, solana.usdc key
     bridge: parseBridgeBlock(parsed.bridge),
     gryd: parseGrydPolicy(parsed.gryd),
+    btc: parseBtcPolicy(parsed.btc),
   };
 }
 

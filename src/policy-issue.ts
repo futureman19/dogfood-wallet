@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import {canonicalBtcDest} from './btc-address';
 import { closeSync, existsSync, fsyncSync, openSync, writeFileSync } from "node:fs";
 import type { PrivateKey } from "@bsv/sdk";
 import { POLICY_TYPE, canonicalPayloadBytes, type PolicyEnvelope } from "./brc181";
@@ -37,13 +38,17 @@ const DEST_PATTERNS: Record<string, RegExp> = {
  *  `p2pkh:` / `script:` / `evm:` / `solana:` explicitly. EVM dests must be
  *  lowercase — that is the canonical form the gate computes. */
 export function validateCanonicalDest(dest: string): string {
+  if(dest.startsWith('btc:')) {
+    if(canonicalBtcDest(dest.slice(4))!==dest)throw Error('BAD_DEST: BTC destination must be canonical.');
+    return dest;
+  }
   for (const [prefix, pattern] of Object.entries(DEST_PATTERNS)) {
     if (dest.startsWith(prefix)) {
       if (!pattern.test(dest)) throw new Error(`BAD_DEST: malformed ${prefix} destination.`);
       return dest;
     }
   }
-  throw new Error("BAD_DEST: destination must start with p2pkh: / script: / evm: / solana:.");
+  throw new Error("BAD_DEST: destination must start with p2pkh: / script: / evm: / solana: / btc:.");
 }
 
 function safeNonNegative(n: number, name: string): number {

@@ -43,6 +43,9 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts x402-proof <X402-Challenge-header> <rawtx-hex> [method] [path]
   bun src/cli.ts x402-delegate <X402-Challenge-header> [method] [path] [--broadcast]
   bun src/cli.ts evm-address
+  bun src/cli.ts btc-address
+  bun src/cli.ts btc-balance
+  bun src/cli.ts btc-send <destination> <sats>
   bun src/cli.ts evm-balance
   bun src/cli.ts sol-address
   bun src/cli.ts sol-balance [--devnet]
@@ -67,6 +70,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
 Send --max-fee: optional nonnegative safe integer, decimal digits only; actual miner fee ceiling.
 Use -- before literal note tokens beginning with -. No preview or automatic retry.
 The LLM never sees the key. Policy lives in the signer.
+btc-send is human-only (never MCP), broadcasts by default; no automatic retry.
 agent-deposit is human-only: broadcasts by default; --no-broadcast SIGNS rawTx and RETAINS a payment hold.
 agent-mint and agent-register are human-only: broadcast / metadata POST by default.
 --no-broadcast is unsigned; --no-post prints a usable signed authorization, not a receipt.
@@ -110,6 +114,20 @@ async function main() {
     return;
   }
   switch (cmd) {
+    case "btc-address":
+    case "btc-balance": {
+      if(a!==undefined)die(`Usage: ${cmd}`);
+      const {btcAddress,btcBalance}=await import('./btc');
+      const address=btcAddress(loadVault(root).key);
+      console.log(cmd==='btc-address'?address:JSON.stringify({address,...await btcBalance(address)},null,2));
+      break;
+    }
+    case "btc-send": {
+      if(!a||!b||rest.length||! /^[0-9]+$/.test(b)||!Number.isSafeInteger(Number(b))||Number(b)<=0)die('Usage: btc-send <destination> <sats>; positive decimal integer sats only');
+      const {sendBtc}=await import('./btc');
+      console.log(JSON.stringify(await sendBtc({root,to:a,sats:Number(b)}),null,2));
+      break;
+    }
     case "init": {
       const { address } = initVault(root);
       console.log("Initialized.");

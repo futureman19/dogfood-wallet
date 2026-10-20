@@ -21,6 +21,14 @@ test('agent-deposit stays owner-only: runtime MCP discovery and invocation isola
 });
 
 describe("mcp", () => {
+  test('BTC send is absent and rejected by real runtime MCP',async()=>{
+    const root=mkdtempSync(join(tmpdir(),'btc-mcp-'));
+    const server=createServer(root),client=new Client({name:'btc-isolation',version:'1'});
+    try{const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(b);await client.connect(a);
+      expect((await client.listTools()).tools.some(t=>/btc.*send|send.*btc/i.test(t.name))).toBe(false);
+      for(const name of ['btc-send','btc_send','sendBtc'])expect((await client.callTool({name,arguments:{to:'bc1qinvalid',sats:1000}})).isError).toBe(true);
+    }finally{await client.close();await server.close();rmSync(root,{recursive:true,force:true});}
+  });
   test("createServer does not throw and does not embed a WIF in its name", () => {
     const root = mkdtempSync(join(tmpdir(), "dogfood-mcp-"));
     try {

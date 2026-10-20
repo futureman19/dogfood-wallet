@@ -16,6 +16,11 @@ Open source (MIT). Not a hosted wallet. Not a consumer portfolio app. No revenue
 
 ## Architecture
 
+BTC treasury receive/hold and **human-only send** are also available via
+`btc-address`, `btc-balance` and `btc-send <destination> <sats>`. BTC is disabled
+for sending until an owner configures its separate policy; it is not an x402,
+bridge or MCP payment rail. See [BTC adapter safety and recovery](docs/btc-adapter.md).
+
 1. **Brain (agent)** — knows what to buy. Talks to the vault over MCP or CLI.
 2. **Vault (this repo)** — keys, per-asset caps, allowlists, killfile, structured rejects. One 32-byte secret derives all three identities (BSV P2PKH, secp256k1 EVM, ed25519 Solana).
 3. **Settlement** — whatever rail the merchant offers: BSV direct, or USDC via x402 `exact` on Base / Solana. Tiny fees make per-call payments real.

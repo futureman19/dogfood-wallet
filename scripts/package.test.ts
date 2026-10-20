@@ -7,7 +7,7 @@ import { isBuiltin } from "node:module";
 const root = resolve(import.meta.dir, "..");
 const manifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
 export const runtimeFiles = readdirSync(resolve(root, "src")).filter(n => n.endsWith(".ts") && !n.endsWith(".test.ts")).map(n => `src/${n}`);
-export const docs = ["README.md", "LICENSE", "docs/quickstart.md", "docs/payment-recovery.md", "docs/bridge-lifecycle.md", "docs/bridge-provider-contracts.md", "docs/x402-v1-client-funding-gap.md", "docs/package-install.md", "docs/gryd-attestation-spec.md", "docs/gryd-deposit.md"];
+export const docs = ["README.md", "LICENSE", "docs/quickstart.md", "docs/payment-recovery.md", "docs/bridge-lifecycle.md", "docs/bridge-provider-contracts.md", "docs/x402-v1-client-funding-gap.md", "docs/package-install.md", "docs/gryd-attestation-spec.md", "docs/gryd-deposit.md", "docs/btc-adapter.md"];
 
 test("every production import declares its own direct runtime dependency", () => {
   const missing = new Set<string>();

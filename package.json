@@ -28,10 +28,11 @@
   "dependencies": {
     "@bsv/sdk": "^3.1.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "@noble/curves": "1.9.7",
+    "@scure/btc-signer": "^2.4.1",
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "^1.99.0",
     "viem": "^2.57.4",
-    "@noble/curves": "1.9.7",
     "zod": "4.6.5"
   },
   "devDependencies": {
@@ -50,6 +51,9 @@
     "docs/package-install.md",
     "src/allowance.ts",
     "src/brc181.ts",
+    "src/btc.ts",
+    "src/btc-address.ts",
+    "docs/btc-adapter.md",
     "src/bridge-changenow.ts",
     "src/bridge-contract.ts",
     "src/bridge-exolix.ts",
