@@ -333,6 +333,21 @@ async function main() {
     }
     case "x402-inspect": {
       if (!a) die("Usage: x402-inspect <X402-Challenge-header>");
+      const { isV2PaymentRequired } = await import("./x402-v2");
+      let v2Body: unknown = null;
+      try {
+        v2Body = JSON.parse(a);
+      } catch {
+        try {
+          v2Body = JSON.parse(Buffer.from(a, "base64").toString("utf8"));
+        } catch {
+          v2Body = null;
+        }
+      }
+      if (v2Body && isV2PaymentRequired(new Headers(), v2Body)) {
+        console.log(JSON.stringify(v2Body, null, 2));
+        break;
+      }
       const vault = loadVault(root);
       const challenge = decodeChallengeHeader(a);
       const result = decideX402(vault.policy, loadUsage(root), challenge);

@@ -110,6 +110,7 @@
     "src/vault.ts",
     "src/x402-delegate.ts",
     "src/x402-pay.ts",
+    "src/x402-v2.ts",
     "src/x402.ts"
   ]
 }
