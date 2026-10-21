@@ -10,6 +10,16 @@ const manifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"))
 export const runtimeFiles = readdirSync(resolve(root, "src")).filter(n => n.endsWith(".ts") && !n.endsWith(".test.ts")).map(n => `src/${n}`);
 export const docs = ["README.md", "LICENSE", "docs/quickstart.md", "docs/payment-recovery.md", "docs/bridge-lifecycle.md", "docs/bridge-provider-contracts.md", "docs/x402-v1-client-funding-gap.md", "docs/package-install.md", "docs/gryd-attestation-spec.md", "docs/gryd-deposit.md", "docs/btc-adapter.md", "docs/doge-adapter.md"];
 
+test("registry identity and provenance metadata match the canonical GitHub repository", () => {
+  expect(manifest.name).toBe("@dogfood/wallet");
+  expect(manifest.version).toBe("0.1.0");
+  expect(manifest.publishConfig).toEqual({ access: "public" });
+  expect(manifest.repository).toEqual({ type: "git", url: "git+https://github.com/futureman19/dogfood-wallet.git" });
+  expect(manifest.homepage).toBe("https://dogfood-wallet.vercel.app");
+  expect(manifest.bugs).toEqual({ url: "https://github.com/futureman19/dogfood-wallet/issues" });
+  expect(manifest.scripts.prepublishOnly).toBe("bun run verify && bun run verify:package");
+});
+
 test("package exclusions allow every reviewed manifest path, including attestations", () => {
   expect([...manifest.files, "package.json"].filter(isExcludedPackagePath)).toEqual([]);
 });

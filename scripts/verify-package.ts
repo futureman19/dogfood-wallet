@@ -31,9 +31,9 @@ try {
   assert(Array.isArray(manifest.files), "package must have an explicit files allowlist");
   assert.deepEqual(paths, [...new Set([...manifest.files, "package.json"])].sort(), "Unexpected or missing packed files");
   assert(!paths.some(isExcludedPackagePath), "Excluded/private inventory path");
-  writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "dogfood-package-consumer", private: true, dependencies: { "dogfood-wallet": `file:${join(scratch, pack.filename).replaceAll("\\", "/")}` } }));
+  writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "dogfood-package-consumer", private: true, dependencies: { "@dogfood/wallet": `file:${join(scratch, pack.filename).replaceAll("\\", "/")}` } }));
   run([process.execPath, "install", "--ignore-scripts"], consumer);
-  const installed = join(consumer, "node_modules", "dogfood-wallet");
+  const installed = join(consumer, "node_modules", "@dogfood", "wallet");
   assert(realpathSync(installed).startsWith(realpathSync(scratch)), "Package escaped scratch");
   const cli = join(installed, manifest.bin["dogfood-wallet"]);
   const deny = join(scratch, "deny-network.ts");

@@ -1,9 +1,20 @@
 {
-  "name": "dogfood-wallet",
+  "name": "@dogfood/wallet",
   "version": "0.1.0",
   "description": "Local BSV agent vault. The LLM requests payment; a signer on your machine authorizes it.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/futureman19/dogfood-wallet.git"
+  },
+  "homepage": "https://dogfood-wallet.vercel.app",
+  "bugs": {
+    "url": "https://github.com/futureman19/dogfood-wallet/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "dogfood-wallet": "src/cli.ts"
   },
@@ -13,7 +24,8 @@
     "verify": "bun run typecheck && bun test",
     "wallet": "bun src/cli.ts",
     "mcp": "bun src/mcp.ts",
-    "verify:package": "bun scripts/verify-package.ts"
+    "verify:package": "bun scripts/verify-package.ts",
+    "prepublishOnly": "bun run verify && bun run verify:package"
   },
   "engines": {
     "bun": ">=1.3.9"
