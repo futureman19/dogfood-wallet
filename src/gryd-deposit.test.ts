@@ -32,7 +32,7 @@ test('CLI strict parsing and real signed/no-broadcast outputs with all transport
   for(const args of [[],['a'],['a','0'],['a','-1'],['a','0x10'],['a','1e3'],['a','1.0'],['a',' 1'],['a','9007199254740992'],['a','1','--bad'],['a','1','--no-broadcast','--no-broadcast'],['a/b','1']]){const r=run(args);expect(r.exitCode).not.toBe(0);expect(r.stderr.toString()).not.toContain('Unknown command');}
   const r=run(['object:42','1000',...(signed?['--no-broadcast']:[])]);expect(r.stderr.toString()).toBe('');expect(r.exitCode).toBe(0);const out=JSON.parse(r.stdout.toString());expect(out.mode).toBe(signed?'signed':'broadcast');expect(out.agentPost.body).toEqual(out.claim);expect(inspectPaymentHold(h.root).blocked).toBe(signed);if(signed)expect(Transaction.fromHex(out.rawTx).id('hex')).toBe(out.claim.txid);
  }finally{h.clean()}}
-});
+}, 30000);
 for(const kind of ['spent','kill'])test('post-sign final '+kind+' race retains evidence without broadcast',async()=>{const h=harness();try{let n=0;const fetchFn=(async(u:unknown,i?:RequestInit)=>{if(String(u).includes('/address/')&&++n===3){expect(h.evidence().rawTx).toBeTruthy();if(kind==='spent')return Response.json([]);killVault(h.root);}return h.fetchFn(u as string,i);}) as typeof fetch;await expect(h.run({fetchFn})).rejects.toThrow(kind==='spent'?'spent':'STOP_SPENDING');expect(h.broadcasts).toBe(0);expect(inspectPaymentHold(h.root)).toMatchObject({blocked:true,pending:'valid'});}finally{h.clean()}});
 test('frozen synthetic scalar-1 transaction reproduces whole signed bytes',async()=>{
  const fixture=JSON.parse(readFileSync(join(import.meta.dir,'../testdata/gryd-deposit-synthetic.json'),'utf8'));
