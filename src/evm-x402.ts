@@ -234,14 +234,14 @@ async function settleUsdcX402V2(opts: Parameters<typeof settleUsdcX402>[0] & {
     paidBody = null;
   }
   const settle = parseV2SettleResponse(paid.headers, paidBody);
-  if (opts.requireReceipt && (settle?.success !== true || !settle.txHash)) {
-    throw new UsdcX402Error("SETTLE_FAILED", "REJECTED: missing or invalid settlement receipt; hold retained.");
-  }
   if (settle && settle.success === false) {
     throw new UsdcX402Error(
       "SETTLE_FAILED",
       `REJECTED: facilitator settlement failed: ${settle.errorReason ?? "unknown error"}.`,
     );
+  }
+  if (opts.requireReceipt && (settle?.success !== true || !settle.txHash)) {
+    throw new UsdcX402Error("SETTLE_FAILED", "REJECTED: missing or invalid settlement receipt; hold retained.");
   }
   if (paid.status >= 400) {
     throw new UsdcX402Error("SETTLE_FAILED", `REJECTED: merchant returned HTTP ${paid.status} after payment.`);

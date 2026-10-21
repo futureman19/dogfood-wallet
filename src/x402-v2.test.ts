@@ -387,6 +387,29 @@ describe("settleUsdcX402 v2 dispatch", () => {
     expect(spends).toHaveLength(0);
   });
 
+  test("requireReceipt does not mask the facilitator errorReason", async () => {
+    // Live lesson 2026-10-21 (x402.org/protected): a rejected settle (402 +
+    // success:false receipt) reported "missing or invalid settlement receipt"
+    // because the requireReceipt check ran first, hiding the real reason.
+    const fetchFn = mockFetch(async (_input, init) => {
+      const h = init?.headers as Record<string, string> | undefined;
+      if (!h?.["PAYMENT-SIGNATURE"]) return jsonResponse(402, v2Body());
+      return jsonResponse(402, {}, { "PAYMENT-RESPONSE": b64(vectors.settlementFailure) });
+    });
+    await expect(
+      settleUsdcX402({
+        url: "https://api.example.com/premium-data",
+        key: KEY,
+        from: FROM,
+        requireReceipt: true,
+        pocket,
+        killfileOn: false,
+        usage: { spentToday: 0, spentLifetime: 0 },
+        fetchFn,
+      }),
+    ).rejects.toMatchObject({ code: "SETTLE_FAILED", message: expect.stringContaining("insufficient_funds") });
+  });
+
   test("policy cap blocks BEFORE signing", async () => {
     const calls: string[] = [];
     let reserved = false;
