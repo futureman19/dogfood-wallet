@@ -25,6 +25,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts payment-inspect
   bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [--max-fee <sats>] [--] [note]
+  bun src/cli.ts popnlocks-sign <txhex> <input-index>  # signs only; NEVER broadcasts
   bun src/cli.ts agent-deposit <agent-id> <sats> [--no-broadcast]
   bun src/cli.ts agent-post <agent.action> '<body-json: {route,body}>' [--no-post]
   bun src/cli.ts agent-call <agent.action> <POST|PUT|DELETE> <path> '<body-json>'
@@ -209,6 +210,12 @@ async function main() {
       const { buyAgent } = await import("./gryd-buy");
       const result = await buyAgent({ root, listingOutpoint: a, maxPriceSats: Number(b), noBroadcast: rest[0] === "--no-broadcast" });
       console.log(JSON.stringify(result, null, 2));
+      break;
+    }
+    case "popnlocks-sign": {
+      if (!a || !b || !/^[0-9]+$/.test(b) || !Number.isSafeInteger(Number(b)) || rest.length) die("Usage: popnlocks-sign <txhex> <input-index>; nonnegative decimal integer index only");
+      const {popnlocksSign} = await import('./popnlocks-sign');
+      console.log(await popnlocksSign({root, txhex:a, inputIndex:Number(b)}));
       break;
     }
     case "agent-deposit": {

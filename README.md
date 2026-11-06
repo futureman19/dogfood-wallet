@@ -77,6 +77,50 @@ bun src/cli.ts split [piece-sats]
 
 `allow`, `sweep`, `split`, and `fund-request` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. Split turns one fat UTXO into up to 20 even self-outputs so later agent sends are not serialized on a single coin. Split does **not** count against daily/lifetime caps. A **human** deletes `STOP_SPENDING` to resume agent sends. Agents must not.
 
+## Popnlocks maker signing (CLI-only)
+
+`bun src/cli.ts popnlocks-sign <txhex> <input-index>` prints only a half-signed
+transaction hex. It **never broadcasts**; the taker signs and broadcasts. Library:
+`popnlocksSign({txhex, inputIndex, root?})` in `src/popnlocks-sign.ts` returns the
+hex string; `root` defaults to `DOGFOOD_WALLET_DIR` / the standard vault directory.
+There is no MCP tool, retry or interactive approval prompt.
+
+Signing is disabled unless the selected vault's policy.json contains an explicit
+`"popnlocks": {"maxPerTxSats": 1000, "maxPerDaySats": 2000}` block (illustrative
+limits only; nothing is installed automatically). Both fields are required
+nonnegative safe integers; zero denies positive inputs. Caps charge the **entire
+selected input value**, not stake minus change, for every issued authorization,
+including repeated requests and transactions that are never broadcast. Daily
+usage is the current UTC day's `asset: "popnlocks"` rows in spends.jsonl, separate
+from ordinary payment budgets. This scoped signing permission is not constrained
+by the ordinary destination allowlist or BRC-181 payment evaluator: enabling it
+explicitly authorizes capped signing of caller-selected outputs.
+
+The primitive accepts exactly two distinct inputs, a positive output 0 and an
+unsigned selected input. It verifies that input's raw source txid, output index,
+value and exact main-vault P2PKH against WoC raw bytes and an unspent triple,
+**before decrypting the key**. It signs only that input with BSV ALL|FORKID (0x41,
+no ANYONECANPAY), preserving the other input and all outputs. STOP_SPENDING is
+checked before key access and immediately before signing. WoC is trusted indexer
+evidence, not SPV or a guarantee against concurrent spends.
+
+**The maker must verify covenant output 0 against the quote before invoking this
+CLI.** The vault does not attest the covenant bytecode, pricing, taker funding,
+anchor or eventual settlement. Output 0's value is evidence, not proof of a valid
+Popnlocks market. Enabling this block exposes up to the configured budget to a
+compromised caller with shell/vault access; MCP absence is not OS access control.
+
+A shared payment lock serializes policy/usage checks. Before releasing the signed
+bytes, the signer fsyncs private exclusive `popnlocks-signs/<paymentId>.jsonl`
+evidence (half-signed txid, input index/value, covenant output value, timestamp,
+source outpoint and rawTx), then fsyncs exposure accounting in spends.jsonl.
+The half-signed txid changes when the taker signs: it is **not** the final chain
+txid. Successful accounted signatures release the execution lock; errors after
+reservation retain it for manual forensic recovery. Never retry automatically,
+including on lost stdout. These records contain usable signed authorization;
+keep them private. Windows directory-fsync/power-loss limitations still apply.
+No live funding, policy edits or broadcasting are part of local verification.
+
 ## Gryd agent envelopes (Phase 1: offline, human-supervised)
 
 ```bash

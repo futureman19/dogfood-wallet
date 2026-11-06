@@ -46,7 +46,7 @@ export function inspectPaymentHold(root: string) {
       pending = "invalid";
       const row = JSON.parse(readFileSync(join(root, "payment.pending.json"), "utf8"));
       if (row?.version === 1 && typeof row.id === "string" && /^[0-9a-f-]{36}$/.test(row.id)
-        && ["doge-send", "btc-send", "send", "agent-buy", "agent-list", "agent-cancel-listing", "agent-mint", "agent-attest", "agent-register", "agent-post", "agent-deposit", "x402-pay", "x402-delegate", "split", "allowance-fund", "bridge-order", "bridge-funded"].includes(row.operation) && typeof row.started === "string" && Number.isFinite(Date.parse(row.started))
+        && ["popnlocks-sign", "doge-send", "btc-send", "send", "agent-buy", "agent-list", "agent-cancel-listing", "agent-mint", "agent-attest", "agent-register", "agent-post", "agent-deposit", "x402-pay", "x402-delegate", "split", "allowance-fund", "bridge-order", "bridge-funded"].includes(row.operation) && typeof row.started === "string" && Number.isFinite(Date.parse(row.started))
         && ["doge", "btc", "bsv", "usdc-base", "usdc-solana"].includes(row.asset) && Number.isSafeInteger(row.amount)
         && (row.operation !== "btc-send" || row.asset === "btc" && Number.isSafeInteger(row.fee) && row.fee >= 0)
         && (row.asset !== "btc" || row.operation === "btc-send")
@@ -96,7 +96,7 @@ export async function withBridgeReconciliation<T>(root: string, intentId: string
   }
 }
 
-export type PaymentOperation = "doge-send" | "btc-send" | "send" | "agent-buy" | "agent-list" | "agent-cancel-listing" | "agent-mint" | "agent-attest" | "agent-register" | "agent-post" | "agent-deposit" | "x402-pay" | "x402-delegate" | "split" | "allowance-fund" | "bridge-order" | "bridge-funded" | "bridge-reconcile-check";
+export type PaymentOperation = "popnlocks-sign" | "doge-send" | "btc-send" | "send" | "agent-buy" | "agent-list" | "agent-cancel-listing" | "agent-mint" | "agent-attest" | "agent-register" | "agent-post" | "agent-deposit" | "x402-pay" | "x402-delegate" | "split" | "allowance-fund" | "bridge-order" | "bridge-funded" | "bridge-reconcile-check";
 export type PaymentIntent = { asset: string; amount: number; to: string; fee?: number };
 export type PaymentGuard = {
   readonly id: string;

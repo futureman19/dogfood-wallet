@@ -24,7 +24,19 @@ export function evaluateGrydBuy(policy: GrydPolicy, killfileOn: boolean, amount:
   return { ok: true };
 }
 
+export type PopnlocksPolicy = { maxPerTxSats: number; maxPerDaySats: number };
+export function parsePopnlocksPolicy(raw: unknown): PopnlocksPolicy | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw Error('Invalid popnlocks policy block');
+  const p = raw as Record<string, unknown>;
+  for (const field of ['maxPerTxSats', 'maxPerDaySats']) {
+    if (typeof p[field] !== 'number' || !Number.isSafeInteger(p[field]) || p[field] < 0) throw Error(`Invalid popnlocks.${field}: nonnegative safe integer required`);
+  }
+  return {maxPerTxSats: p.maxPerTxSats as number, maxPerDaySats: p.maxPerDaySats as number};
+}
+
 export type Policy = {
+  popnlocks?: PopnlocksPolicy;
   btc?: BtcPolicy;
   doge?: DogePolicy;
   gryd?: GrydPolicy;

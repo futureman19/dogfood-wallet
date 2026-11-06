@@ -102,6 +102,7 @@
     "src/merchant.ts",
     "src/payment-guard.ts",
     "src/policy.ts",
+    "src/popnlocks-sign.ts",
     "src/policy-issue.ts",
     "src/replay-store.ts",
     "src/send.ts",

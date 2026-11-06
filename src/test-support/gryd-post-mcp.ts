@@ -12,7 +12,7 @@ try{
  initVault(root);
  const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(b);await client.connect(a);
  const listed=await client.listTools();
- if(listed.tools.some(t=>/agent.post|agent.call/i.test(t.name)))throw Error('Human-only tool exposed');
- for(const name of ['agent_post','agent-post','agent_call']){const result=await client.callTool({name,arguments:{action:'agent.mine',input:{route:{},body:{}}}});if(!result.isError)throw Error('Unexpected tool accepted');}
+ if(listed.tools.some(t=>/agent.post|agent.call|popnlocks/i.test(t.name)))throw Error('Human-only tool exposed');
+ for(const name of ['agent_post','agent-post','agent_call','popnlocks-sign','popnlocks_sign']){const result=await client.callTool({name,arguments:{action:'agent.mine',input:{route:{},body:{}}}});if(!result.isError)throw Error('Unexpected tool accepted');}
  console.log(JSON.stringify({isolated:true,names:listed.tools.map(t=>t.name)}));
 }finally{await client.close();await server.close();rmSync(root,{recursive:true,force:true});}
