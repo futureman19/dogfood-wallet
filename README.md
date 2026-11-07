@@ -80,7 +80,23 @@ bun src/cli.ts split [piece-sats]
 ## Popnlocks maker signing (CLI-only)
 
 `bun src/cli.ts popnlocks-sign <txhex> <input-index>` prints only a half-signed
-transaction hex. It **never broadcasts**; the taker signs and broadcasts. Library:
+transaction hex. It **never broadcasts**; the taker signs and broadcasts.
+
+For production-sized transactions (a Popnlocks covenant alone is ~71k hex chars,
+past Windows argv limits), use the bounded stdin transport:
+
+```
+bun src/cli.ts popnlocks-sign --stdin <input-index> < deploy-tx.hex
+```
+
+Stdin transport contract: ASCII transaction hex read to EOF; one single trailing
+LF or CRLF allowed; maximum 1,048,576 input bytes; a finite 10-second input
+deadline. Empty, malformed, odd-length, oversized or timed-out input is rejected
+on stderr with a non-zero exit **before** policy, keys, network or signing are
+touched. Stdout remains the half-signed hex only. The legacy argv form is
+unchanged for argv-safe sizes.
+
+Library:
 `popnlocksSign({txhex, inputIndex, root?})` in `src/popnlocks-sign.ts` returns the
 hex string; `root` defaults to `DOGFOOD_WALLET_DIR` / the standard vault directory.
 There is no MCP tool, retry or interactive approval prompt.

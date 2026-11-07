@@ -26,6 +26,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts allow <p2pkh-address>
   bun src/cli.ts send <to-address> <sats> [--max-fee <sats>] [--] [note]
   bun src/cli.ts popnlocks-sign <txhex> <input-index>  # signs only; NEVER broadcasts
+  bun src/cli.ts popnlocks-sign --stdin <input-index>  # txhex from stdin (<=1 MiB, 10 s deadline)
   bun src/cli.ts agent-deposit <agent-id> <sats> [--no-broadcast]
   bun src/cli.ts agent-post <agent.action> '<body-json: {route,body}>' [--no-post]
   bun src/cli.ts agent-call <agent.action> <POST|PUT|DELETE> <path> '<body-json>'
@@ -213,9 +214,23 @@ async function main() {
       break;
     }
     case "popnlocks-sign": {
-      if (!a || !b || !/^[0-9]+$/.test(b) || !Number.isSafeInteger(Number(b)) || rest.length) die("Usage: popnlocks-sign <txhex> <input-index>; nonnegative decimal integer index only");
+      let txhex: string, inputIndex: number;
+      if (a === "--stdin") {
+        // Bounded stdin transport: ASCII hex to EOF (one trailing LF/CRLF
+        // allowed), <=1,048,576 bytes, 10 s deadline; validated BEFORE the
+        // signer, keys, policy or network are touched. For production-sized
+        // covenants that exceed OS argv limits.
+        if (!b || !/^[0-9]+$/.test(b) || !Number.isSafeInteger(Number(b)) || rest.length) die("Usage: popnlocks-sign --stdin <input-index>; nonnegative decimal integer index only");
+        const {readHexFromStdin} = await import('./stdin-hex');
+        txhex = await readHexFromStdin();
+        inputIndex = Number(b);
+      } else {
+        if (!a || !b || !/^[0-9]+$/.test(b) || !Number.isSafeInteger(Number(b)) || rest.length) die("Usage: popnlocks-sign <txhex> <input-index> | popnlocks-sign --stdin <input-index>; nonnegative decimal integer index only");
+        txhex = a;
+        inputIndex = Number(b);
+      }
       const {popnlocksSign} = await import('./popnlocks-sign');
-      console.log(await popnlocksSign({root, txhex:a, inputIndex:Number(b)}));
+      console.log(await popnlocksSign({root, txhex, inputIndex}));
       break;
     }
     case "agent-deposit": {
