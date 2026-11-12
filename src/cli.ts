@@ -23,9 +23,12 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts verify-auth <address> <message> <sig>   # keyless: verify any vault's auth sig
   bun src/cli.ts request-allow <p2pkh-address> [reason]  # agent files an allowlist escalation
   bun src/cli.ts request-cap <field> <sats|null> [reason]# agent files a cap-raise escalation
+  bun src/cli.ts request-send <address> <sats> [reason]  # agent asks a one-time payment permit
   bun src/cli.ts requests                                # list the escalation queue
+  bun src/cli.ts permits                                 # list issued one-time permits
   bun src/cli.ts request-approve <id>                    # human-only: executes the ask
   bun src/cli.ts request-deny <id> [reason]              # human-only
+  bun src/cli.ts permit-revoke <id>                      # human-only: revoke an unspent permit
   bun src/cli.ts balance
   bun src/cli.ts status
   bun src/cli.ts doctor
@@ -315,9 +318,36 @@ async function main() {
       }
       break;
     }
+    case "request-send": {
+      if (!a || b === undefined) die("Usage: request-send <p2pkh-address> <sats> [reason]");
+      const amount = /^[0-9]+$/.test(b) ? Number(b) : undefined;
+      if (amount === undefined) die("Usage: request-send <address> <sats> [reason] — sats must be a non-negative integer");
+      const { fileRequest } = await import("./requests");
+      try {
+        console.log(JSON.stringify(fileRequest(root, { kind: "permit-send", to: a, amount, reason: rest[0] }), null, 2));
+      } catch (e) {
+        die(e instanceof Error ? e.message : String(e));
+      }
+      break;
+    }
     case "requests": {
       const { listRequests } = await import("./requests");
       console.log(JSON.stringify(listRequests(root), null, 2));
+      break;
+    }
+    case "permits": {
+      const { listPermits } = await import("./permits");
+      console.log(JSON.stringify(listPermits(root), null, 2));
+      break;
+    }
+    case "permit-revoke": {
+      if (!a) die("Usage: permit-revoke <permit-id>");
+      const { revokePermit } = await import("./permits");
+      try {
+        console.log(JSON.stringify(revokePermit(root, a), null, 2));
+      } catch (e) {
+        die(e instanceof Error ? e.message : String(e));
+      }
       break;
     }
     case "request-approve": {

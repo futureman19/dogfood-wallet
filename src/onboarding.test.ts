@@ -17,7 +17,7 @@ test("newcomer CLI and both MCP transports select the same isolated vault", asyn
     expect(p.exitCode).toBe(0);
     return p.stdout.toString().trim();
   };
-  const names = ["address", "auth_sign", "auth_verify", "balance", "kill", "request_allow", "request_cap", "requests", "send", "status", "x402_inspect", "x402_proof", "x402_delegate", "x402_pay"].sort();
+  const names = ["address", "auth_sign", "auth_verify", "balance", "kill", "request_allow", "request_cap", "request_send", "requests", "send", "status", "x402_inspect", "x402_proof", "x402_delegate", "x402_pay"].sort();
   const clients: Client[] = [];
   let http: ReturnType<typeof Bun.spawn> | undefined;
   try {

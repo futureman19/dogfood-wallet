@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Utils } from "@bsv/sdk";
 import { allowDestination, updatePolicyCap, vaultPaths } from "./vault";
+import { issuePermit } from "./permits";
 
 /**
  * Human-in-the-loop escalation: an agent that hits a policy denial FILES a
@@ -14,7 +15,7 @@ export const MAX_PENDING_REQUESTS = 64;
 const MAX_REASON_BYTES = 280;
 
 export type CapField = "maxSatsPerTx" | "maxSatsPerDay" | "maxSatsLifetime";
-export type RequestKind = "allow-destination" | "raise-cap";
+export type RequestKind = "allow-destination" | "raise-cap" | "permit-send";
 
 export interface PolicyRequest {
   id: string;
@@ -22,6 +23,8 @@ export interface PolicyRequest {
   address?: string;
   field?: CapField;
   value?: number | null;
+  to?: string;
+  amount?: number;
   reason?: string;
   status: "pending" | "approved" | "denied";
   createdAt: string;
@@ -42,6 +45,18 @@ function validReason(v: unknown): v is string | undefined {
       Buffer.from(v).toString("utf8") === v &&
       !/[\x00-\x1f\x7f]/.test(v))
   );
+}
+
+// SDK P2PKH.test also accepts script-hash versions; require the real mainnet
+// P2PKH prefix so a queued ask can never strand a send.
+function strictP2pkh(v: unknown): v is string {
+  if (typeof v !== "string") return false;
+  try {
+    const decoded = Utils.fromBase58Check(v);
+    return decoded.prefix.length === 1 && decoded.prefix[0] === 0 && decoded.data.length === 20;
+  } catch {
+    return false;
+  }
 }
 
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -77,21 +92,17 @@ function readRequest(root: string, id: string): PolicyRequest {
   return JSON.parse(readFileSync(path, "utf8")) as PolicyRequest;
 }
 
-function validate(input: { kind: RequestKind; address?: unknown; field?: unknown; value?: unknown; reason?: unknown }): void {
+function validate(input: { kind: RequestKind; address?: unknown; field?: unknown; value?: unknown; to?: unknown; amount?: unknown; reason?: unknown }): void {
   if (!validReason(input.reason)) invalid("reason must be a single UTF-8 line of at most " + MAX_REASON_BYTES + " bytes");
   if (input.kind === "allow-destination") {
-    // SDK P2PKH.test also accepts script-hash versions; require the real
-    // mainnet P2PKH prefix so a queued ask can never strand a send.
-    let ok = false;
-    if (typeof input.address === "string") {
-      try {
-        const decoded = Utils.fromBase58Check(input.address);
-        ok = decoded.prefix.length === 1 && decoded.prefix[0] === 0 && decoded.data.length === 20;
-      } catch {
-        ok = false;
-      }
+    if (!strictP2pkh(input.address)) invalid("address must be a mainnet P2PKH address");
+    return;
+  }
+  if (input.kind === "permit-send") {
+    if (!strictP2pkh(input.to)) invalid("to must be a mainnet P2PKH address");
+    if (typeof input.amount !== "number" || !Number.isSafeInteger(input.amount) || input.amount <= 0) {
+      invalid("amount must be a positive safe integer of satoshis");
     }
-    if (!ok) invalid("address must be a mainnet P2PKH address");
     return;
   }
   if (input.kind === "raise-cap") {
@@ -108,18 +119,19 @@ function validate(input: { kind: RequestKind; address?: unknown; field?: unknown
     }
     return;
   }
-  invalid("kind must be allow-destination or raise-cap");
+  invalid("kind must be allow-destination, raise-cap or permit-send");
 }
 
 function sameAsk(a: PolicyRequest, b: PolicyRequest): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === "allow-destination") return a.address === b.address;
+  if (a.kind === "permit-send") return a.to === b.to && a.amount === b.amount;
   return a.field === b.field && a.value === b.value;
 }
 
 export function fileRequest(
   root: string,
-  input: { kind: RequestKind; address?: unknown; field?: unknown; value?: unknown; reason?: unknown },
+  input: { kind: RequestKind; address?: unknown; field?: unknown; value?: unknown; to?: unknown; amount?: unknown; reason?: unknown },
 ): { request: PolicyRequest; created: boolean } {
   validate(input);
   const pending = listRequests(root, "pending");
@@ -128,6 +140,7 @@ export function fileRequest(
     kind: input.kind,
     ...(input.kind === "allow-destination" ? { address: input.address as string } : {}),
     ...(input.kind === "raise-cap" ? { field: input.field as CapField, value: input.value as number | null } : {}),
+    ...(input.kind === "permit-send" ? { to: input.to as string, amount: input.amount as number } : {}),
     ...(input.reason !== undefined ? { reason: input.reason as string } : {}),
     status: "pending",
     createdAt: "",
@@ -159,12 +172,14 @@ export function listRequests(root: string, status?: PolicyRequest["status"]): Po
   return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-/** Human-only (CLI): approval executes the SAME mutation as `allow`/policy edit. */
+/** Human-only (CLI): approval executes the SAME mutation as `allow`/policy edit — or issues a one-time send permit. */
 export function approveRequest(root: string, id: string): PolicyRequest {
   const request = readRequest(root, id);
   if (request.status !== "pending") throw new Error("Invalid request: not pending (status " + request.status + ")");
   if (request.kind === "allow-destination") {
     allowDestination(root, request.address!);
+  } else if (request.kind === "permit-send") {
+    issuePermit(root, { id: request.id, to: request.to!, amount: request.amount!, reason: request.reason });
   } else {
     updatePolicyCap(root, request.field!, request.value!);
   }

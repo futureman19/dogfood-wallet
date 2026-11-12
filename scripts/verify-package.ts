@@ -72,7 +72,7 @@ const client = new Client({ name: 'packed-acceptance', version: '1' });
 try {
  await client.connect(new StdioClientTransport({ command: process.execPath, args: ${JSON.stringify([...args, cli, "mcp"])}, cwd: ${JSON.stringify(unrelated)}, env: process.env }));
  const tools = (await client.listTools()).tools.map(t => t.name).sort();
- assert.deepEqual(tools, ['address','auth_sign','auth_verify','balance','kill','request_allow','request_cap','requests','send','status','x402_inspect','x402_proof','x402_delegate','x402_pay'].sort());
+ assert.deepEqual(tools, ['address','auth_sign','auth_verify','balance','kill','request_allow','request_cap','request_send','requests','send','status','x402_inspect','x402_proof','x402_delegate','x402_pay'].sort());
  // Library exports map: curated root + ./mcp resolve from the installed copy; deep paths are gated.
  const rootLib = await import('@dogfood/wallet');
  assert.equal(typeof rootLib.verifyAuthMessage, 'function', 'exports root missing verifyAuthMessage');

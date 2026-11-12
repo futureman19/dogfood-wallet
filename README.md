@@ -108,13 +108,27 @@ channel).
 ```bash
 bun src/cli.ts request-allow <p2pkh-address> [reason]   # ask to allowlist a destination
 bun src/cli.ts request-cap maxSatsPerTx 25000 [reason]  # ask to raise (or null, clear) a cap
+bun src/cli.ts request-send <address> <sats> [reason]   # ask a one-time payment permit
 bun src/cli.ts requests                                 # both sides list the queue
+bun src/cli.ts permits                                  # list issued permits
 bun src/cli.ts request-approve <id>                     # human: executes the ask
 bun src/cli.ts request-deny <id> [reason]               # human: declines with a note
+bun src/cli.ts permit-revoke <id>                       # human: revoke an unspent permit
 ```
 
-MCP tools: `request_allow`, `request_cap`, `requests`. Destinations are
-validated as strict mainnet P2PKH before filing.
+MCP tools: `request_allow`, `request_cap`, `request_send`, `requests`.
+Destinations are validated as strict mainnet P2PKH before filing.
+
+### One-time payment permits
+
+An approved `permit-send` ask issues a permit (`~/.dogfood-wallet/permits/`)
+that waives the allowlist **and** caps for ONE `send` of the exact
+`{to, amount}`. The killfile still wins, a BRC-181 envelope still gates, and
+the spend logs/accrues normally. Consumption is durable: the permit commits
+before signing, releases back to `unspent` on any pre-commitment failure
+(safe to retry), stamps the txid on success, and stays `committed` on an
+ambiguous broadcast for human reconciliation. A policy-passing send never
+touches a permit. Permits apply to the BSV `send` rail only — not x402.
 
 ## Embed it (library exports)
 

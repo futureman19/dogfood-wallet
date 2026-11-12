@@ -4,6 +4,7 @@ import { P2PKH, Transaction } from "@bsv/sdk";
 import { evaluateSend, evaluateSweep, evaluateSplit, planSplit, DEFAULT_SPLIT_PIECE, isValidAddress } from "./policy";
 import { loadUsage, loadVault, vaultPaths } from "./vault";
 import { gateAgentSend, loadPolicyEnvelope } from "./brc181";
+import { commitPermit, findPermit, releasePermit, spendPermit } from "./permits";
 
 export type Utxo = { tx_hash: string; tx_pos: number; value: number };
 
@@ -116,8 +117,23 @@ export async function sendPayment(opts: {
       const vault = loadVault(opts.root);
       const usage = loadUsage(opts.root);
       const decision = evaluateSend(vault.policy, opts.amount, opts.to, usage);
-      if (!decision.ok) return decision;
-
+      // One-time human-approved permits waive ONLY the allowlist and caps for
+      // the exact {to, amount} — never the killfile, never bad input, never a
+      // BRC-181 envelope. The spend still logs and accrues to usage normally.
+      let permitId: string | undefined;
+      if (!decision.ok) {
+        const waivable =
+          decision.code === "ALLOWLIST" || decision.code === "CAP" || decision.code === "DAY" || decision.code === "LIFETIME";
+        const permit = waivable ? findPermit(opts.root, opts.to, opts.amount) : undefined;
+        if (!permit) return decision;
+        commitPermit(opts.root, permit.id);
+        permitId = permit.id;
+      }
+      // The permit burns at guard.reserve (payment commitment). Every earlier
+      // failure — envelope gate, INSUFFICIENT, source verification, FEE_CAP —
+      // releases it for a safe retry.
+      let reserved = false;
+      try {
       const loaded = loadPolicyEnvelope(vaultPaths(opts.root).brc181);
       if (!loaded.ok) return loaded;
       const pre = gateAgentSend({
@@ -196,12 +212,17 @@ export async function sendPayment(opts: {
         return { ok: false, code: "FEE_CAP", message: `REJECTED: Miner fee ${fee} sats exceeds maxFeeSats ${opts.maxFeeSats}.` };
       }
       guard.reserve({ asset: "bsv", amount: opts.amount, to: opts.to, fee });
+      reserved = true;
       await tx.sign();
       const raw = tx.toHex();
       const { txid } = await (opts.broadcast ?? defaultBroadcast)(raw);
       if (txid !== tx.id("hex")) throw new Error("Ambiguous broadcast acknowledgement; payment hold retained.");
+      if (permitId) spendPermit(opts.root, permitId, txid);
       guard.log({ t: new Date().toISOString(), txid, to: opts.to, amount: opts.amount, fee, note: opts.note ?? "" });
       return { ok: true, txid, amount: opts.amount, to: opts.to, fee };
+      } finally {
+        if (permitId && !reserved) releasePermit(opts.root, permitId);
+      }
     });
   } catch (e) {
     if (e instanceof PaymentHeldError) return { ok: false, code: e.code, message: e.message };

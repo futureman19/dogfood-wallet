@@ -69,6 +69,7 @@
     "src/allowance.ts",
     "src/auth-sign.ts",
     "src/requests.ts",
+    "src/permits.ts",
     "src/index.ts",
     "src/brc181.ts",
     "src/btc.ts",

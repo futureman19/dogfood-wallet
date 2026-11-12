@@ -148,6 +148,27 @@ export function createServer(root: string) {
   );
 
   server.registerTool(
+    "request_send",
+    {
+      description:
+        "Escalate to the human: ask for a ONE-TIME permit to send an exact {to, amount} BSV payment that current policy denies. If approved, your next matching send consumes it — allowlist and caps are waived for that payment only (killfile still wins; the spend still logs).",
+      inputSchema: {
+        to: z.string().describe("Mainnet P2PKH destination"),
+        amount: z.number().int().positive().describe("Exact satoshis you intend to send"),
+        reason: z.string().optional().describe("Single line, max 280 bytes"),
+      },
+    },
+    async ({ to, amount, reason }) => {
+      const { fileRequest } = await import("./requests");
+      try {
+        return text(fileRequest(root, { kind: "permit-send", to, amount, reason }));
+      } catch (e) {
+        return text({ ok: false, error: e instanceof Error ? e.message : String(e) }, true);
+      }
+    },
+  );
+
+  server.registerTool(
     "requests",
     {
       description: "List your filed escalation requests and their status (pending/approved/denied). Approving or denying is human-only and never on MCP.",

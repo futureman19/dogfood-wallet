@@ -34,6 +34,7 @@ export function vaultPaths(root: string) {
     allowance: join(root, "allowance.json"),
     allowances: join(root, "allowances"),
     requests: join(root, "requests"),
+    permits: join(root, "permits"),
   };
 }
 
