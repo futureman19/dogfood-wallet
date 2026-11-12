@@ -107,6 +107,58 @@ export function createServer(root: string) {
   );
 
   server.registerTool(
+    "request_allow",
+    {
+      description:
+        "Escalate to the human: file a request to add a destination to the BSV allowlist. Does NOT change policy — a human must approve via the CLI. Identical pending requests dedupe to the same id.",
+      inputSchema: {
+        address: z.string().describe("Mainnet P2PKH address you want allowlisted"),
+        reason: z.string().optional().describe("Single line, max 280 bytes: why you need it"),
+      },
+    },
+    async ({ address, reason }) => {
+      const { fileRequest } = await import("./requests");
+      try {
+        return text(fileRequest(root, { kind: "allow-destination", address, reason }));
+      } catch (e) {
+        return text({ ok: false, error: e instanceof Error ? e.message : String(e) }, true);
+      }
+    },
+  );
+
+  server.registerTool(
+    "request_cap",
+    {
+      description:
+        "Escalate to the human: file a request to raise (or clear, with null) a BSV spend cap. Does NOT change policy — a human must approve via the CLI.",
+      inputSchema: {
+        field: z.enum(["maxSatsPerTx", "maxSatsPerDay", "maxSatsLifetime"]),
+        value: z.number().int().positive().nullable().describe("New cap in sats; null clears maxSatsPerDay/maxSatsLifetime only"),
+        reason: z.string().optional().describe("Single line, max 280 bytes"),
+      },
+    },
+    async ({ field, value, reason }) => {
+      const { fileRequest } = await import("./requests");
+      try {
+        return text(fileRequest(root, { kind: "raise-cap", field, value, reason }));
+      } catch (e) {
+        return text({ ok: false, error: e instanceof Error ? e.message : String(e) }, true);
+      }
+    },
+  );
+
+  server.registerTool(
+    "requests",
+    {
+      description: "List your filed escalation requests and their status (pending/approved/denied). Approving or denying is human-only and never on MCP.",
+    },
+    async () => {
+      const { listRequests } = await import("./requests");
+      return text(listRequests(root));
+    },
+  );
+
+  server.registerTool(
     "kill",
     { description: "Freeze spending. A human must delete STOP_SPENDING in the vault dir to resume. Agents must not delete it." },
     async () => {

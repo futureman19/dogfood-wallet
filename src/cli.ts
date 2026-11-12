@@ -21,6 +21,11 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts address
   bun src/cli.ts sign-auth <message>                     # prove vault control, no funds move
   bun src/cli.ts verify-auth <address> <message> <sig>   # keyless: verify any vault's auth sig
+  bun src/cli.ts request-allow <p2pkh-address> [reason]  # agent files an allowlist escalation
+  bun src/cli.ts request-cap <field> <sats|null> [reason]# agent files a cap-raise escalation
+  bun src/cli.ts requests                                # list the escalation queue
+  bun src/cli.ts request-approve <id>                    # human-only: executes the ask
+  bun src/cli.ts request-deny <id> [reason]              # human-only
   bun src/cli.ts balance
   bun src/cli.ts status
   bun src/cli.ts doctor
@@ -282,6 +287,54 @@ async function main() {
       try {
         const out = verifyAuthMessage({ address, message, signature });
         console.log(JSON.stringify({ valid: true, ...out }, null, 2));
+      } catch (e) {
+        die(e instanceof Error ? e.message : String(e));
+      }
+      break;
+    }
+    case "request-allow": {
+      if (!a) die("Usage: request-allow <p2pkh-address> [reason]");
+      const { fileRequest } = await import("./requests");
+      try {
+        console.log(JSON.stringify(fileRequest(root, { kind: "allow-destination", address: a, reason: b }), null, 2));
+      } catch (e) {
+        die(e instanceof Error ? e.message : String(e));
+      }
+      break;
+    }
+    case "request-cap": {
+      const valueText = b;
+      if (!a || valueText === undefined) die("Usage: request-cap <maxSatsPerTx|maxSatsPerDay|maxSatsLifetime> <sats|null> [reason]");
+      const { fileRequest } = await import("./requests");
+      const value = valueText === "null" ? null : /^[0-9]+$/.test(valueText) ? Number(valueText) : undefined;
+      if (value === undefined) die("Usage: request-cap <field> <sats|null> [reason] — value must be a non-negative integer or null");
+      try {
+        console.log(JSON.stringify(fileRequest(root, { kind: "raise-cap", field: a, value, reason: rest[0] }), null, 2));
+      } catch (e) {
+        die(e instanceof Error ? e.message : String(e));
+      }
+      break;
+    }
+    case "requests": {
+      const { listRequests } = await import("./requests");
+      console.log(JSON.stringify(listRequests(root), null, 2));
+      break;
+    }
+    case "request-approve": {
+      if (!a) die("Usage: request-approve <request-id>");
+      const { approveRequest } = await import("./requests");
+      try {
+        console.log(JSON.stringify(approveRequest(root, a), null, 2));
+      } catch (e) {
+        die(e instanceof Error ? e.message : String(e));
+      }
+      break;
+    }
+    case "request-deny": {
+      if (!a) die("Usage: request-deny <request-id> [reason]");
+      const { denyRequest } = await import("./requests");
+      try {
+        console.log(JSON.stringify(denyRequest(root, a, b), null, 2));
       } catch (e) {
         die(e instanceof Error ? e.message : String(e));
       }

@@ -33,6 +33,7 @@ export function vaultPaths(root: string) {
     brc181: join(root, "brc181.json"),
     allowance: join(root, "allowance.json"),
     allowances: join(root, "allowances"),
+    requests: join(root, "requests"),
   };
 }
 
@@ -213,6 +214,27 @@ function parseEvmBlock(raw: unknown): { usdc?: EvmAssetPolicy } | undefined {
   };
 }
 
+// Only call after validating JSON. Locate a top-level scalar (number|null)
+// value's raw span so unknown fields and formatting survive an in-place edit.
+function scalarSpan(raw: string, key: string): { start: number; end: number } | undefined {
+  const tokens = [...raw.matchAll(/"(?:\\[\s\S]|[^"\\])*"|[{}\[\]:,]|[^\s{}\[\]:,]+/g)];
+  let depth = 0;
+  let span: { start: number; end: number } | undefined;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    const text = token[0];
+    if (depth === 1 && text.startsWith('"') && tokens[i + 1]?.[0] === ":" && JSON.parse(text) === key) {
+      if (span) throw new Error(`Invalid policy.json: duplicate ${key} keys.`);
+      const value = tokens[i + 2]!;
+      if (value[0] === "{" || value[0] === "[") throw new Error(`Invalid policy.json: ${key} must be a scalar.`);
+      span = { start: value.index!, end: value.index! + value[0].length };
+    }
+    if (text === "{" || text === "[") depth++;
+    if (text === "}" || text === "]") depth--;
+  }
+  return span;
+}
+
 // Only call after validating JSON and the BSV allowlist shape. Locate its raw
 // value so unknown fields, large numbers, escaped keys and formatting survive.
 function allowlistSpan(raw: string): { start: number; end: number } | undefined {
@@ -279,6 +301,36 @@ export function allowDestination(root: string, address: string): string[] {
     : raw.slice(0, end) + `${Object.keys(stored).length ? "," : ""}"allowlist":${value}` + raw.slice(end);
   replacePolicyAtomically(path, updated);
   return list;
+}
+
+// Human-only policy-cap edit (direct CLI or an approved agent request).
+// Same discipline as allowDestination: splice the raw text in place so
+// unknown fields, comments-free formatting and foreign blocks survive.
+export function updatePolicyCap(
+  root: string,
+  field: "maxSatsPerTx" | "maxSatsPerDay" | "maxSatsLifetime",
+  value: number | null,
+): void {
+  if (field !== "maxSatsPerTx" && field !== "maxSatsPerDay" && field !== "maxSatsLifetime") {
+    throw new Error("Invalid policy cap field.");
+  }
+  if (value !== null && (typeof value !== "number" || !Number.isInteger(value) || value <= 0)) {
+    throw new Error("Invalid policy cap value: positive integer or null.");
+  }
+  if (field === "maxSatsPerTx" && value === null) {
+    throw new Error("Invalid policy cap value: maxSatsPerTx cannot be null.");
+  }
+  const path = vaultPaths(root).policy;
+  const raw = readFileSync(path, "utf8");
+  parsePolicyObject(raw);
+  const span = scalarSpan(raw, field);
+  loadVault(root); // Retain the existing initialized/key/address integrity check.
+  const text = value === null ? "null" : String(value);
+  const end = raw.lastIndexOf("}");
+  const updated = span
+    ? raw.slice(0, span.start) + text + raw.slice(span.end)
+    : raw.slice(0, end) + `${Object.keys(parsePolicyObject(raw)).length ? "," : ""}${JSON.stringify(field)}:${text}` + raw.slice(end);
+  replacePolicyAtomically(path, updated);
 }
 
 export function loadUsage(root: string, now = new Date(), asset = "bsv") {

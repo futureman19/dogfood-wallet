@@ -95,6 +95,27 @@ MCP tools: `auth_sign` (killfile freezes signing too; caps/allowlist do not
 apply — no funds move) and `auth_verify`. Messages are bounded single-line
 UTF-8 (≤4096 bytes); testnet and script-hash addresses are rejected.
 
+## Escalation queue (agent files, human decides)
+
+When an agent hits a policy denial it can **ask** instead of silently
+failing. Requests live in `~/.dogfood-wallet/requests/`, dedupe while
+pending, and are bounded (64 pending). Agents file and list; **approving or
+denying is human-only** (CLI, never MCP). Approval executes the exact same
+mutation as the human's own `allow` / policy edit — no new powers exist for
+agents. Filing works even while the killfile is on (it is the escalation
+channel).
+
+```bash
+bun src/cli.ts request-allow <p2pkh-address> [reason]   # ask to allowlist a destination
+bun src/cli.ts request-cap maxSatsPerTx 25000 [reason]  # ask to raise (or null, clear) a cap
+bun src/cli.ts requests                                 # both sides list the queue
+bun src/cli.ts request-approve <id>                     # human: executes the ask
+bun src/cli.ts request-deny <id> [reason]               # human: declines with a note
+```
+
+MCP tools: `request_allow`, `request_cap`, `requests`. Destinations are
+validated as strict mainnet P2PKH before filing.
+
 ## Popnlocks maker signing (CLI-only)
 
 `bun src/cli.ts popnlocks-sign <txhex> <input-index>` prints only a half-signed
