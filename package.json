@@ -62,6 +62,7 @@
     "docs/x402-v1-client-funding-gap.md",
     "docs/package-install.md",
     "src/allowance.ts",
+    "src/auth-sign.ts",
     "src/brc181.ts",
     "src/btc.ts",
     "src/doge.ts",

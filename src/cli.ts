@@ -19,6 +19,8 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
 
   bun src/cli.ts init
   bun src/cli.ts address
+  bun src/cli.ts sign-auth <message>                     # prove vault control, no funds move
+  bun src/cli.ts verify-auth <address> <message> <sig>   # keyless: verify any vault's auth sig
   bun src/cli.ts balance
   bun src/cli.ts status
   bun src/cli.ts doctor
@@ -262,6 +264,29 @@ async function main() {
     case "address":
       console.log(loadVault(root).address);
       break;
+    case "sign-auth": {
+      if (!a) die("Usage: sign-auth <message>");
+      const { signVaultAuth } = await import("./auth-sign");
+      try {
+        console.log(JSON.stringify(signVaultAuth(root, a), null, 2));
+      } catch (e) {
+        die(e instanceof Error ? e.message : String(e));
+      }
+      break;
+    }
+    case "verify-auth": {
+      // Keyless: verifies any vault's auth signature. No vault required.
+      const [address, message, signature] = [a, b, rest[0]];
+      if (!address || !message || !signature) die("Usage: verify-auth <address> <message> <signature>");
+      const { verifyAuthMessage } = await import("./auth-sign");
+      try {
+        const out = verifyAuthMessage({ address, message, signature });
+        console.log(JSON.stringify({ valid: true, ...out }, null, 2));
+      } catch (e) {
+        die(e instanceof Error ? e.message : String(e));
+      }
+      break;
+    }
     case "balance":
       await cmdBalance(root);
       break;

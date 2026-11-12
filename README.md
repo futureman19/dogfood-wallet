@@ -77,6 +77,24 @@ bun src/cli.ts split [piece-sats]
 
 `allow`, `sweep`, `split`, and `fund-request` are **human-only** — not MCP tools. Sweep bypasses caps, allowlist, and killfile so the owner can take funds back. Split turns one fat UTXO into up to 20 even self-outputs so later agent sends are not serialized on a single coin. Split does **not** count against daily/lifetime caps. A **human** deletes `STOP_SPENDING` to resume agent sends. Agents must not.
 
+## Sign-to-auth (agent-callable, no funds move)
+
+Agents prove control of the vault address to a service (or to another agent)
+**without a payment**: the vault BSM-signs the service's single-line challenge
+under the `Dogfood Auth v1\n` domain — separate from Locus signed writes,
+attestations, and every payment signature, so an auth signature can never
+replay as one. Verification is keyless: the service recovers the pubkey from
+the compact signature and binds it to the claimed address.
+
+```bash
+bun src/cli.ts sign-auth <message>                    # {address, pubkey, message, signature}
+bun src/cli.ts verify-auth <address> <message> <sig>  # keyless; no vault needed
+```
+
+MCP tools: `auth_sign` (killfile freezes signing too; caps/allowlist do not
+apply — no funds move) and `auth_verify`. Messages are bounded single-line
+UTF-8 (≤4096 bytes); testnet and script-hash addresses are rejected.
+
 ## Popnlocks maker signing (CLI-only)
 
 `bun src/cli.ts popnlocks-sign <txhex> <input-index>` prints only a half-signed

@@ -67,6 +67,46 @@ export function createServer(root: string) {
   );
 
   server.registerTool(
+    "auth_sign",
+    {
+      description:
+        "Prove control of this vault's address WITHOUT moving funds: BSM-sign a service's challenge under the 'Dogfood Auth v1' domain. Caps/allowlist do not apply; the killfile freezes signing too. Never reveals the key.",
+      inputSchema: {
+        message: z.string().describe(`Single-line challenge from the service (max 4096 bytes)`),
+      },
+    },
+    async ({ message }) => {
+      const { signVaultAuth } = await import("./auth-sign");
+      try {
+        return text(signVaultAuth(root, message));
+      } catch (e) {
+        return text({ ok: false, error: e instanceof Error ? e.message : String(e) }, true);
+      }
+    },
+  );
+
+  server.registerTool(
+    "auth_verify",
+    {
+      description:
+        "Keyless: verify another vault's auth signature (agent-to-agent or service-side checks). Recovers the signer pubkey and binds it to the claimed address.",
+      inputSchema: {
+        address: z.string().describe("Claimed mainnet P2PKH vault address"),
+        message: z.string().describe("The exact challenge that was signed"),
+        signature: z.string().describe("Compact-recoverable BSM signature, base64"),
+      },
+    },
+    async ({ address, message, signature }) => {
+      const { verifyAuthMessage } = await import("./auth-sign");
+      try {
+        return text({ valid: true, ...verifyAuthMessage({ address, message, signature }) });
+      } catch (e) {
+        return text({ ok: false, error: e instanceof Error ? e.message : String(e) }, true);
+      }
+    },
+  );
+
+  server.registerTool(
     "kill",
     { description: "Freeze spending. A human must delete STOP_SPENDING in the vault dir to resume. Agents must not delete it." },
     async () => {
