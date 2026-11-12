@@ -128,7 +128,8 @@ the spend logs/accrues normally. Consumption is durable: the permit commits
 before signing, releases back to `unspent` on any pre-commitment failure
 (safe to retry), stamps the txid on success, and stays `committed` on an
 ambiguous broadcast for human reconciliation. A policy-passing send never
-touches a permit. Permits apply to the BSV `send` rail only — not x402.
+touches a permit. Permits apply to both the BSV `send` rail and the BSV x402
+rail (`x402-pay` / `x402_pay`), not to USDC/Solana rails.
 
 ## Embed it (library exports)
 

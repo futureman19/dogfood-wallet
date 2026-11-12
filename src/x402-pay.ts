@@ -2,6 +2,7 @@ import { withPaymentGuard } from "./payment-guard";
 import { readFileSync } from "node:fs";
 import { loadVault, loadUsage, vaultPaths } from "./vault";
 import { loadPolicyEnvelope } from "./brc181";
+import { findPermit, commitPermit, releasePermit, spendPermit } from "./permits";
 
 /** Shared CLI/MCP rail order. Only a typed UNSUPPORTED advances currencies. */
 export async function payX402(root: string, url: string) {
@@ -28,6 +29,12 @@ export async function payX402(root: string, url: string) {
         usage: loadUsage(root, new Date(), "bsv"),
         brc181SpentTotal: loadUsage(root, new Date(), "brc181-bsv").spentLifetime,
         ownSpendTxids: ownSpendTxids.slice(-10),
+        permitHooks: {
+          find: (to, amount) => findPermit(root, to, amount)?.id,
+          commit: (id) => { commitPermit(root, id); },
+          release: (id) => { releasePermit(root, id); },
+          spend: (id, txid) => { spendPermit(root, id, txid); },
+        },
         // Load the signed BSV policy only if a BSV requirement is offered.
         get policyEnvelope() {
           const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);

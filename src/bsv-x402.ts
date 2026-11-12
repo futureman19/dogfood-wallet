@@ -57,6 +57,12 @@ export async function settleBsvX402(opts: {
   fetchFn?: typeof fetch;
   beforeSign?: (intent: PaymentIntent) => void;
   onSpend?: (row: Record<string, unknown>) => void;
+  permitHooks?: {
+    find(to: string, amount: number): string | undefined;
+    commit(id: string): void;
+    release(id: string): void;
+    spend(id: string, txid: string): void;
+  };
   policyEnvelope?: PolicyEnvelope | null;
   origin?: string;
   /** Recent own bsv send txids (from the spend log). WoC's /unspent only
@@ -71,7 +77,16 @@ export async function settleBsvX402(opts: {
   const req = pickBsvDirect(await first.json());
   if (!req) throw new BsvX402Error("UNSUPPORTED", "REJECTED: no bsv-direct/bsv-main requirement offered.");
   const decision = evaluateSend(opts.policy, req.satoshis, req.payTo, opts.usage);
-  if (!decision.ok) throw new BsvX402Error(decision.code, decision.message);
+  let permitId: string | undefined;
+  if (!decision.ok) {
+    if (["ALLOWLIST", "CAP", "DAY", "LIFETIME"].includes(decision.code)) {
+      permitId = opts.permitHooks?.find(req.payTo, req.satoshis);
+    }
+    if (!permitId) throw new BsvX402Error(decision.code, decision.message);
+    opts.permitHooks!.commit(permitId);
+  }
+  let reserved = false;
+  try {
   const gate = (fee: number) => {
     const d = gateAgentSend({ envelope: opts.policyEnvelope, to: req.payTo, amount: req.satoshis, fee, spentTotal: opts.brc181SpentTotal ?? opts.usage.spentLifetime, origin: opts.origin });
     if (!d.ok) throw new BsvX402Error(d.code, d.message);
@@ -118,6 +133,8 @@ export async function settleBsvX402(opts: {
   tx.addOutput({ satoshis: req.satoshis, lockingScript: new P2PKH().lock(req.payTo) });
   if (change > 1) tx.addOutput({ satoshis: change, lockingScript: new P2PKH().lock(opts.from) });
   opts.beforeSign?.({ asset: "bsv", amount: req.satoshis, to: req.payTo, fee: actualFee });
+  // Once reserved, signing/submission failures are ambiguous: retain the permit.
+  reserved = true;
   await tx.sign();
   const txid = tx.id("hex");
   // Merchant owns broadcast. Never independently broadcast or try another rail after signing.
@@ -130,6 +147,10 @@ export async function settleBsvX402(opts: {
   if (!paid.ok || receipt?.success !== true || receipt.network !== "bsv-main" || receipt.transaction !== txid) {
     throw new BsvX402Error("SETTLE_FAILED", `REJECTED: merchant HTTP ${paid.status} or invalid BSV settlement receipt; do not automatically retry payment.`);
   }
+  if (permitId) opts.permitHooks!.spend(permitId, txid);
   opts.onSpend?.({ t: new Date().toISOString(), kind: "send", asset: "bsv", amount: req.satoshis, to: req.payTo, txid, resource: opts.url, fee: actualFee });
   return { ok: true, txid, amount: req.satoshis, payTo: req.payTo, fee: actualFee, body: await paid.text() };
+  } finally {
+    if (permitId && !reserved) opts.permitHooks!.release(permitId);
+  }
 }

@@ -256,7 +256,7 @@ export function createServer(root: string) {
     "x402_pay",
     {
       description:
-        "Pay an x402 URL using the same rails as CLI x402-pay: BSV direct (bsv-direct/bsv-main), then Base USDC, then Solana USDC. Switches only on UNSUPPORTED, never after policy, funding, or settlement errors. Enforces per-asset caps, allowlists, killfile, and optional BRC-181 for BSV; logs successful spends per asset. USDC pockets require human-configured evm.usdc or solana.usdc policy blocks. Returns the selected rail's settlement result.",
+        "Pay an x402 URL using the same rails as CLI x402-pay: BSV direct (bsv-direct/bsv-main), then Base USDC, then Solana USDC. Switches only on UNSUPPORTED, never after policy, funding, or settlement errors. Enforces per-asset caps, allowlists, killfile, and optional BRC-181 for BSV; logs successful spends per asset. USDC pockets require human-configured evm.usdc or solana.usdc policy blocks. Returns the selected rail's settlement result. A human-approved one-time permit for the exact BSV {payTo, satoshis} is consumed here the same way as send.",
       inputSchema: {
         url: z.string().describe("URL of the x402-gated resource"),
       },
