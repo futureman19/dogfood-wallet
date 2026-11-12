@@ -18,6 +18,11 @@
   "bin": {
     "dogfood-wallet": "src/cli.ts"
   },
+  "exports": {
+    ".": "./src/index.ts",
+    "./mcp": "./src/mcp.ts",
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -64,6 +69,7 @@
     "src/allowance.ts",
     "src/auth-sign.ts",
     "src/requests.ts",
+    "src/index.ts",
     "src/brc181.ts",
     "src/btc.ts",
     "src/doge.ts",

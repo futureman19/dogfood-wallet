@@ -72,7 +72,17 @@ const client = new Client({ name: 'packed-acceptance', version: '1' });
 try {
  await client.connect(new StdioClientTransport({ command: process.execPath, args: ${JSON.stringify([...args, cli, "mcp"])}, cwd: ${JSON.stringify(unrelated)}, env: process.env }));
  const tools = (await client.listTools()).tools.map(t => t.name).sort();
- assert.deepEqual(tools, ['address','balance','kill','send','status','x402_inspect','x402_proof','x402_delegate','x402_pay'].sort());
+ assert.deepEqual(tools, ['address','auth_sign','auth_verify','balance','kill','request_allow','request_cap','requests','send','status','x402_inspect','x402_proof','x402_delegate','x402_pay'].sort());
+ // Library exports map: curated root + ./mcp resolve from the installed copy; deep paths are gated.
+ const rootLib = await import('@dogfood/wallet');
+ assert.equal(typeof rootLib.verifyAuthMessage, 'function', 'exports root missing verifyAuthMessage');
+ assert.equal(typeof rootLib.fileRequest, 'function', 'exports root missing fileRequest');
+ assert.equal(rootLib.approveRequest, undefined, 'human-decision function leaked to exports root');
+ const mcpLib = await import('@dogfood/wallet/mcp');
+ assert.equal(typeof mcpLib.createServer, 'function', 'exports ./mcp missing createServer');
+ let gated = false;
+ try { await import('@dogfood/wallet/src/vault'); } catch { gated = true; }
+ assert(gated, 'deep import @dogfood/wallet/src/vault bypassed the exports map');
  const output = JSON.stringify(await client.callTool({ name: 'address', arguments: {} }));
  assert(output.includes(${JSON.stringify(address)}));
  const denied = JSON.stringify(await client.callTool({ name: 'send', arguments: { to: ${JSON.stringify(address)}, amount: 1 } }));

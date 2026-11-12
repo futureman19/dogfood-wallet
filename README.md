@@ -116,6 +116,23 @@ bun src/cli.ts request-deny <id> [reason]               # human: declines with a
 MCP tools: `request_allow`, `request_cap`, `requests`. Destinations are
 validated as strict mainnet P2PKH before filing.
 
+## Embed it (library exports)
+
+Agent frameworks can use the wallet **in-process**, no CLI or MCP transport
+required. The package exports map gates deep internals — only the curated
+surface resolves:
+
+```ts
+import { verifyAuthMessage, fileRequest, listRequests } from "@dogfood/wallet";
+import { createServer } from "@dogfood/wallet/mcp"; // in-process MCP tools
+```
+
+The root entry is keyless verification (`verifyAuthMessage`, `signAuthMessage`)
+plus the agent-side escalation queue (`fileRequest`, `listRequests`). Payment,
+key-loading and human-decision functions (`approveRequest`, `sendPayment`,
+`loadVault`, …) are **not** exported — deep imports like
+`@dogfood/wallet/src/vault` fail by design.
+
 ## Popnlocks maker signing (CLI-only)
 
 `bun src/cli.ts popnlocks-sign <txhex> <input-index>` prints only a half-signed
