@@ -44,6 +44,7 @@ describe("package library surface", () => {
       "sendPayment", "sweepPayment", "splitPayment", "sendRaw",
       "loadVault", "initVault", "allowDestination", "updatePolicyCap",
       "approveRequest", "denyRequest", "signVaultAuth", "killVault",
+      "doorInit", "signOspGrant", "revokeOspDoor",
     ];
     for (const name of banned) expect((rootExport as Record<string, unknown>)[name]).toBeUndefined();
   });

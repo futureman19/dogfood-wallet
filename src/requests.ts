@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Utils } from "@bsv/sdk";
 import { allowDestination, updatePolicyCap, vaultPaths } from "./vault";
 import { issuePermit } from "./permits";
+import { canonicalScope } from "./osp-scope";
 
 /**
  * Human-in-the-loop escalation: an agent that hits a policy denial FILES a
@@ -15,7 +16,7 @@ export const MAX_PENDING_REQUESTS = 64;
 const MAX_REASON_BYTES = 280;
 
 export type CapField = "maxSatsPerTx" | "maxSatsPerDay" | "maxSatsLifetime";
-export type RequestKind = "allow-destination" | "raise-cap" | "permit-send";
+export type RequestKind = "allow-destination" | "raise-cap" | "permit-send" | "osp-grant";
 
 export interface PolicyRequest {
   id: string;
@@ -26,6 +27,12 @@ export interface PolicyRequest {
   to?: string;
   amount?: number;
   reason?: string;
+  // osp-grant ask: the exact scope bytes + envelope params the human approves
+  door?: string;
+  scopeCanonical?: string;
+  expiryHeight?: number;
+  maxEgressBytes?: number;
+  sessionPubHex?: string;
   status: "pending" | "approved" | "denied";
   createdAt: string;
   decidedAt?: string;
@@ -92,7 +99,9 @@ function readRequest(root: string, id: string): PolicyRequest {
   return JSON.parse(readFileSync(path, "utf8")) as PolicyRequest;
 }
 
-function validate(input: { kind: RequestKind; address?: unknown; field?: unknown; value?: unknown; to?: unknown; amount?: unknown; reason?: unknown }): void {
+const DOOR_NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+function validate(input: { kind: RequestKind; address?: unknown; field?: unknown; value?: unknown; to?: unknown; amount?: unknown; reason?: unknown; door?: unknown; scopeCanonical?: unknown; expiryHeight?: unknown; maxEgressBytes?: unknown; sessionPubHex?: unknown }): void {
   if (!validReason(input.reason)) invalid("reason must be a single UTF-8 line of at most " + MAX_REASON_BYTES + " bytes");
   if (input.kind === "allow-destination") {
     if (!strictP2pkh(input.address)) invalid("address must be a mainnet P2PKH address");
@@ -102,6 +111,29 @@ function validate(input: { kind: RequestKind; address?: unknown; field?: unknown
     if (!strictP2pkh(input.to)) invalid("to must be a mainnet P2PKH address");
     if (typeof input.amount !== "number" || !Number.isSafeInteger(input.amount) || input.amount <= 0) {
       invalid("amount must be a positive safe integer of satoshis");
+    }
+    return;
+  }
+  if (input.kind === "osp-grant") {
+    if (typeof input.door !== "string" || !DOOR_NAME_RE.test(input.door)) invalid("door must be a valid door name");
+    if (typeof input.scopeCanonical !== "string" || input.scopeCanonical.length === 0 || Buffer.byteLength(input.scopeCanonical, "utf8") > 4096) {
+      invalid("scopeCanonical must be a non-empty canonical scope blob of at most 4096 bytes");
+    }
+    try {
+      canonicalScope(input.scopeCanonical); // the exact door-side validation; the bytes are the ask
+    } catch (e) {
+      invalid(e instanceof Error ? e.message : String(e));
+    }
+    if (input.expiryHeight !== undefined && (!Number.isSafeInteger(input.expiryHeight) || (input.expiryHeight as number) < 1 || (input.expiryHeight as number) > 0xffffffff)) {
+      invalid("expiryHeight must be a positive safe integer");
+    }
+    if (input.maxEgressBytes !== undefined && (!Number.isSafeInteger(input.maxEgressBytes) || (input.maxEgressBytes as number) < 1)) {
+      invalid("maxEgressBytes must be a positive safe integer");
+    }
+    if (input.sessionPubHex !== undefined) {
+      if (typeof input.sessionPubHex !== "string" || !/^[0-9a-f]{66}$/.test(input.sessionPubHex)) {
+        invalid("sessionPubHex must be a 33-byte compressed pubkey as lowercase hex");
+      }
     }
     return;
   }
@@ -119,19 +151,24 @@ function validate(input: { kind: RequestKind; address?: unknown; field?: unknown
     }
     return;
   }
-  invalid("kind must be allow-destination, raise-cap or permit-send");
+  invalid("kind must be allow-destination, raise-cap, permit-send or osp-grant");
 }
 
 function sameAsk(a: PolicyRequest, b: PolicyRequest): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === "allow-destination") return a.address === b.address;
   if (a.kind === "permit-send") return a.to === b.to && a.amount === b.amount;
+  if (a.kind === "osp-grant") {
+    return a.door === b.door && a.scopeCanonical === b.scopeCanonical
+      && a.expiryHeight === b.expiryHeight && a.maxEgressBytes === b.maxEgressBytes
+      && a.sessionPubHex === b.sessionPubHex;
+  }
   return a.field === b.field && a.value === b.value;
 }
 
 export function fileRequest(
   root: string,
-  input: { kind: RequestKind; address?: unknown; field?: unknown; value?: unknown; to?: unknown; amount?: unknown; reason?: unknown },
+  input: { kind: RequestKind; address?: unknown; field?: unknown; value?: unknown; to?: unknown; amount?: unknown; reason?: unknown; door?: unknown; scopeCanonical?: unknown; expiryHeight?: unknown; maxEgressBytes?: unknown; sessionPubHex?: unknown },
 ): { request: PolicyRequest; created: boolean } {
   validate(input);
   const pending = listRequests(root, "pending");
@@ -141,6 +178,15 @@ export function fileRequest(
     ...(input.kind === "allow-destination" ? { address: input.address as string } : {}),
     ...(input.kind === "raise-cap" ? { field: input.field as CapField, value: input.value as number | null } : {}),
     ...(input.kind === "permit-send" ? { to: input.to as string, amount: input.amount as number } : {}),
+    ...(input.kind === "osp-grant"
+      ? {
+          door: input.door as string,
+          scopeCanonical: input.scopeCanonical as string,
+          ...(input.expiryHeight !== undefined ? { expiryHeight: input.expiryHeight as number } : {}),
+          ...(input.maxEgressBytes !== undefined ? { maxEgressBytes: input.maxEgressBytes as number } : {}),
+          ...(input.sessionPubHex !== undefined ? { sessionPubHex: input.sessionPubHex as string } : {}),
+        }
+      : {}),
     ...(input.reason !== undefined ? { reason: input.reason as string } : {}),
     status: "pending",
     createdAt: "",
@@ -173,17 +219,39 @@ export function listRequests(root: string, status?: PolicyRequest["status"]): Po
 }
 
 /** Human-only (CLI): approval executes the SAME mutation as `allow`/policy edit — or issues a one-time send permit. */
-export function approveRequest(root: string, id: string): PolicyRequest {
+export async function approveRequest(root: string, id: string, opts?: { fetchFn?: typeof fetch }): Promise<PolicyRequest> {
   const request = readRequest(root, id);
   if (request.status !== "pending") throw new Error("Invalid request: not pending (status " + request.status + ")");
+  let decision: string | undefined;
   if (request.kind === "allow-destination") {
     allowDestination(root, request.address!);
   } else if (request.kind === "permit-send") {
     issuePermit(root, { id: request.id, to: request.to!, amount: request.amount!, reason: request.reason });
+  } else if (request.kind === "osp-grant") {
+    // Approve = the human's one-touch signature: re-validate the durable ask,
+    // then sign + broadcast the exact scope bytes. No silent widening.
+    validate(request);
+    const { signOspGrant } = await import("./osp");
+    const out = await signOspGrant({
+      root,
+      door: request.door!,
+      scopeCanonical: request.scopeCanonical!,
+      expiryHeight: request.expiryHeight,
+      maxEgressBytes: request.maxEgressBytes,
+      sessionPubHex: request.sessionPubHex,
+      fetchFn: opts?.fetchFn,
+    });
+    decision = "osp grant broadcast " + out.txid + " on door " + request.door
+      + (out.paymentSats > 0 ? " (paid " + out.paymentSats + " sats)" : "") + " fee " + out.fee;
   } else {
     updatePolicyCap(root, request.field!, request.value!);
   }
-  const decided: PolicyRequest = { ...request, status: "approved", decidedAt: new Date().toISOString() };
+  const decided: PolicyRequest = {
+    ...request,
+    status: "approved",
+    decidedAt: new Date().toISOString(),
+    ...(decision !== undefined ? { decision } : {}),
+  };
   writeRequestAtomic(requestPath(root, id), decided);
   return decided;
 }

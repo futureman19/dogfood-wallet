@@ -131,6 +131,57 @@ ambiguous broadcast for human reconciliation. A policy-passing send never
 touches a permit. Permits apply to both the BSV `send` rail and the BSV x402
 rail (`x402-pay` / `x402_pay`), not to USDC/Solana rails.
 
+## OSP door ownership (Open and Shut Protocol)
+
+The vault can **own doors** on the [Open and Shut Protocol](https://github.com/futureman19/open-and-shut-protocol):
+on-chain UTXO-granted access control where one spend is authorization + payment +
+receipt. The door tip locks to a **derived subkey**
+(`vault.key.deriveChild(vault.key.toPublicKey(), "dogfood/osp/v1")` — same
+self-ECDH doctrine as the BTC/DOGE adapters), never the raw vault key. Funding
+comes from, and change returns to, the main vault address — distinct from the
+tip script, satisfying the OSP-0001 change/continuation rule.
+
+```bash
+bun src/cli.ts osp address                                  # derived door-owner identity (read-only)
+bun src/cli.ts osp list                                     # doors, status, tracked tips
+bun src/cli.ts osp init <door-name>                         # human-only: genesis tip on mainnet
+bun src/cli.ts osp grant --door <name> --scope '<json>' [--expiry N] [--egress N] [--session-pub HEX] [--pay N --payee ADDR]
+bun src/cli.ts osp grant --door <name> --scope '<json>' --request   # file the ask instead of signing
+bun src/cli.ts osp revoke <door-name>                       # human-only: permanent on-chain close
+```
+
+**Human-only** (never MCP): init/grant/revoke sign and broadcast on mainnet.
+Agents get `osp_doors` (read-only) and `request_osp_grant` — the agent composes
+the **exact canonical scope blob** (OSP-0002: sorted keys, no floats, 128-bit
+lowercase-hex salt) plus its own session pubkey; approval signs and broadcasts
+those exact bytes. Nothing can be widened after the human decides — the scope
+hash in the on-chain envelope commits the door to what was shown.
+
+Scope validation happens **before any key or chain access**. The envelope/scope
+codecs are byte-pinned to the audited upstream golden vectors
+(`testdata/osp-vectors.json`). `--pay N --payee ADDR` embeds OSP-0005 payment
+terms as `{amount_sats, script}` inside the signed scope — one spend pays the
+door's payee and opens the session atomically.
+
+Signing is disabled unless `policy.json` carries an explicit block (absent =
+fail-closed):
+
+```json
+"osp": { "maxSatsPerTx": 1000, "maxSatsPerDay": 5000 }
+```
+
+Caps charge **everything that leaves the vault** (payment + miner fee;
+door-init/revoke fees count too), fee-inclusive, against their own `osp` log
+scope. The killfile always wins; a configured BRC-181 envelope additionally
+gates paid grants (destination + budget); the payment hold/evidence/ambiguous-
+broadcast doctrine is the shared one (fsynced intent before signing, HOLD on
+uncertainty, never auto-retry). The door file (`osp-doors/<name>.json`) tracks
+tip, chain history and status; chain tip-liveness is WoC **indexer evidence,
+not SPV** — a tip spent externally refuses to sign and asks for manual
+reconciliation rather than signing over drift. After `osp init`, register the
+printed `{genesisDisplayTxid, tipLockingScriptHex}` with your door service (the
+protocol repo's reference door is `osp-door.futureman19.workers.dev`).
+
 ## Embed it (library exports)
 
 Agent frameworks can use the wallet **in-process**, no CLI or MCP transport

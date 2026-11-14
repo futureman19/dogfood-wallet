@@ -35,11 +35,45 @@ export function parsePopnlocksPolicy(raw: unknown): PopnlocksPolicy | undefined 
   return {maxPerTxSats: p.maxPerTxSats as number, maxPerDaySats: p.maxPerDaySats as number};
 }
 
+// OSP door-grant policy: sats that LEAVE the vault when signing Open and Shut
+// Protocol transitions (grant payment + miner fee + the 1-sat tip chain;
+// door-init/revoke fees count too). Absent block = DISABLED (fail-closed).
+export type OspPolicy = { maxSatsPerTx: number; maxSatsPerDay: number | null };
+export function parseOspPolicy(raw: unknown): OspPolicy | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw Error('Invalid osp policy block');
+  const p = raw as Record<string, unknown>;
+  if (typeof p.maxSatsPerTx !== 'number' || !Number.isSafeInteger(p.maxSatsPerTx) || p.maxSatsPerTx < 0)
+    throw Error('Invalid osp.maxSatsPerTx: nonnegative safe integer required');
+  if (p.maxSatsPerDay !== null && (typeof p.maxSatsPerDay !== 'number' || !Number.isSafeInteger(p.maxSatsPerDay) || p.maxSatsPerDay < 0))
+    throw Error('Invalid osp.maxSatsPerDay: nonnegative safe integer or null required');
+  return { maxSatsPerTx: p.maxSatsPerTx, maxSatsPerDay: p.maxSatsPerDay };
+}
+
+/** totalSats = everything leaving the vault in this transition (payment + fee). */
+export function evaluateOspTransition(
+  osp: OspPolicy | undefined,
+  killfileOn: boolean,
+  totalSats: number,
+  usage: Usage = { spentToday: 0, spentLifetime: 0 },
+): Decision {
+  if (!osp) return { ok: false, code: 'DISABLED', message: 'REJECTED: no osp policy configured.' };
+  if (killfileOn) return { ok: false, code: 'KILL', message: 'REJECTED: STOP_SPENDING is on.' };
+  if (!Number.isSafeInteger(totalSats) || totalSats < 0)
+    return { ok: false, code: 'BAD_AMOUNT', message: 'REJECTED: OSP transition total must be a nonnegative safe integer.' };
+  if (totalSats > osp.maxSatsPerTx)
+    return { ok: false, code: 'CAP', message: 'REJECTED: Exceeds osp.maxSatsPerTx.' };
+  if (osp.maxSatsPerDay !== null && usage.spentToday > osp.maxSatsPerDay - totalSats)
+    return { ok: false, code: 'DAY', message: 'REJECTED: Exceeds osp.maxSatsPerDay.' };
+  return { ok: true };
+}
+
 export type Policy = {
   popnlocks?: PopnlocksPolicy;
   btc?: BtcPolicy;
   doge?: DogePolicy;
   gryd?: GrydPolicy;
+  osp?: OspPolicy;
   maxSatsPerTx: number;
   maxSatsPerDay: number | null;
   maxSatsLifetime: number | null;
@@ -423,10 +457,12 @@ export function usageFromLog(lines: string[], now: Date = new Date(), asset = "b
       const rowAsset = typeof row.asset === "string" ? row.asset : "bsv";
       if (asset === "gryd") {
         if (row.kind !== "agent-buy") continue;
+      } else if (asset === "osp") {
+        if (row.kind !== "osp-grant" && row.kind !== "osp-door-init" && row.kind !== "osp-revoke") continue;
       } else if (!(BRC181_SCOPES[asset] ?? [asset]).includes(rowAsset)) continue;
       let amount =
         typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
-      if ((asset === "brc181-bsv" || asset === "brc181-btc" || asset === "brc181-doge") && typeof row.fee === "number" && Number.isSafeInteger(row.fee) && row.fee > 0) amount += row.fee;
+      if ((asset === "brc181-bsv" || asset === "brc181-btc" || asset === "brc181-doge" || asset === "osp") && typeof row.fee === "number" && Number.isSafeInteger(row.fee) && row.fee > 0) amount += row.fee;
       spentLifetime += amount;
       if (typeof row.t === "string") {
         const day = asset === "gryd" ? (Number.isFinite(Date.parse(row.t)) ? utcDay(new Date(row.t)) : "") : row.t.slice(0, 10);

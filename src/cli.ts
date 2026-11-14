@@ -48,6 +48,11 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts agent-list <ordinal-outpoint> <price-sats> [--no-broadcast]
   bun src/cli.ts agent-cancel-listing <listing-outpoint> [--no-broadcast]
   bun src/cli.ts fund-request <sats>
+  bun src/cli.ts osp address                                # this vault's OSP door-owner identity
+  bun src/cli.ts osp list                                   # doors, status, tracked tips
+  bun src/cli.ts osp init <door-name>                       # human-only: on-chain door genesis
+  bun src/cli.ts osp grant --door <name> --scope '<json>' [--expiry N] [--egress N] [--session-pub HEX] [--pay N --payee ADDR] [--request]
+  bun src/cli.ts osp revoke <door-name>                     # human-only: permanent on-chain close
   bun src/cli.ts kill
   bun src/cli.ts sweep <p2pkh-address>
   bun src/cli.ts split [piece-sats]
@@ -94,6 +99,8 @@ agent-buy is human-only: purchases on chain by default; --no-broadcast is an uns
 agent-list and agent-cancel-listing are human-only: broadcast by default; unsigned --no-broadcast preview.
 Phase 3 backend compatibility is pending; do not use live until the Gryd verifier is updated.
 allow, sweep, split, fund-request, allowance-*, policy-inspect, and policy-issue are human-only (not MCP tools).
+osp init/grant/revoke are human-only: sign + broadcast OSP door transitions; --request files an agent ask instead.
+osp grant --scope needs an OSP-0002 canonical blob (sorted keys, 128-bit hex salt); --pay/--payee embed OSP-0005 payment terms.
 Vault dir: $DOGFOOD_WALLET_DIR or ~/.dogfood-wallet
 `;
 
@@ -350,11 +357,94 @@ async function main() {
       }
       break;
     }
+    case "osp": {
+      const osp = await import("./osp");
+      const { ospAddress, strictP2pkhAddress, p2pkhScriptHex } = await import("./osp-address");
+      const args = [b, ...rest].filter((t): t is string => t !== undefined);
+      try {
+        if (a === "address") {
+          const vault = loadVault(root);
+          console.log(JSON.stringify({ ospOwnerAddress: ospAddress(vault.key) }, null, 2));
+        } else if (a === "list") {
+          console.log(JSON.stringify(osp.listOspDoors(root), null, 2));
+        } else if (a === "init") {
+          const name = args[0];
+          if (!name) die("Usage: osp init <door-name>");
+          const out = await osp.doorInit({ root, name });
+          console.log(JSON.stringify({ ...out, note: "register {genesisDisplayTxid, tipLockingScriptHex} with the door service" }, null, 2));
+        } else if (a === "grant") {
+          const flags: Record<string, string | boolean> = {};
+          for (let i = 0; i < args.length; i++) {
+            const t = args[i]!;
+            if (t === "--request") { flags.request = true; continue; }
+            if (t.startsWith("--")) {
+              const v = args[++i];
+              if (v === undefined || v.startsWith("--")) die(`REJECTED: ${t} requires a value.`);
+              if (flags[t] !== undefined) die(`REJECTED: duplicate ${t}.`);
+              flags[t] = v;
+            } else {
+              die(`REJECTED: unexpected osp grant argument '${t}' — use --flags.`);
+            }
+          }
+          const door = flags["--door"];
+          const scopeRaw = flags["--scope"];
+          if (typeof door !== "string" || typeof scopeRaw !== "string") {
+            die("Usage: osp grant --door <name> --scope '<json>' [--expiry N] [--egress N] [--session-pub HEX] [--pay N --payee ADDR] [--request]");
+          }
+          let scopeObj: Record<string, unknown>;
+          try {
+            scopeObj = JSON.parse(scopeRaw);
+          } catch {
+            die("REJECTED: --scope must be a JSON object (quote it for your shell).");
+          }
+          if (typeof scopeObj !== "object" || scopeObj === null || Array.isArray(scopeObj)) die("REJECTED: --scope must be a JSON object.");
+          if (flags["--pay"] !== undefined || flags["--payee"] !== undefined) {
+            if (flags["--pay"] === undefined || flags["--payee"] === undefined) die("REJECTED: --pay and --payee go together.");
+            if (scopeObj.payment !== undefined) die("REJECTED: scope already contains payment; do not mix with --pay/--payee.");
+            const amount_sats = Number(flags["--pay"]);
+            if (!/^[0-9]+$/.test(flags["--pay"] as string) || !Number.isSafeInteger(amount_sats) || amount_sats <= 0) {
+              die("REJECTED: --pay requires a positive safe integer of satoshis.");
+            }
+            const payee = flags["--payee"] as string;
+            if (!strictP2pkhAddress(payee)) die("REJECTED: --payee must be a mainnet P2PKH address.");
+            // OSP-0005 terms ride the scope blob as {amount_sats, script} — the
+            // exact shape the deployed door verifier enforces.
+            scopeObj.payment = { amount_sats, script: p2pkhScriptHex(payee) };
+          }
+          const scopeCanonical = osp.scopeCanonicalFrom(scopeObj);
+          const expiryHeight = flags["--expiry"] !== undefined ? Number(flags["--expiry"]) : undefined;
+          const maxEgressBytes = flags["--egress"] !== undefined ? Number(flags["--egress"]) : undefined;
+          if (expiryHeight !== undefined && (!/^[0-9]+$/.test(flags["--expiry"] as string) || !Number.isSafeInteger(expiryHeight))) {
+            die("REJECTED: --expiry requires a positive safe integer block height.");
+          }
+          if (maxEgressBytes !== undefined && (!/^[0-9]+$/.test(flags["--egress"] as string) || !Number.isSafeInteger(maxEgressBytes))) {
+            die("REJECTED: --egress requires a positive safe integer byte cap.");
+          }
+          const sessionPubHex = flags["--session-pub"] !== undefined ? String(flags["--session-pub"]).toLowerCase() : undefined;
+          if (flags.request) {
+            const { fileRequest } = await import("./requests");
+            console.log(JSON.stringify(fileRequest(root, { kind: "osp-grant", door, scopeCanonical, expiryHeight, maxEgressBytes, sessionPubHex }), null, 2));
+          } else {
+            const out = await osp.signOspGrant({ root, door, scopeCanonical, expiryHeight, maxEgressBytes, sessionPubHex });
+            console.log(JSON.stringify({ ...out, scopeCanonical }, null, 2));
+          }
+        } else if (a === "revoke") {
+          const name = args[0];
+          if (!name) die("Usage: osp revoke <door-name>");
+          console.log(JSON.stringify(await osp.revokeOspDoor({ root, door: name }), null, 2));
+        } else {
+          die("Usage: osp <address|list|init|grant|revoke>");
+        }
+      } catch (e) {
+        die(e instanceof Error ? e.message : String(e));
+      }
+      break;
+    }
     case "request-approve": {
       if (!a) die("Usage: request-approve <request-id>");
       const { approveRequest } = await import("./requests");
       try {
-        console.log(JSON.stringify(approveRequest(root, a), null, 2));
+        console.log(JSON.stringify(await approveRequest(root, a), null, 2));
       } catch (e) {
         die(e instanceof Error ? e.message : String(e));
       }

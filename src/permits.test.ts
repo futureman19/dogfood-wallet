@@ -36,14 +36,14 @@ function funded(root: string) {
   };
 }
 
-function approvePermit(root: string, to: string, amount: number, reason?: string) {
+async function approvePermit(root: string, to: string, amount: number, reason?: string) {
   const { request } = fileRequest(root, { kind: "permit-send", to, amount, reason });
-  approveRequest(root, request.id);
+  await approveRequest(root, request.id);
   return request.id;
 }
 
 describe("permit-send requests", () => {
-  test("file + approve creates an unspent permit; validation is strict", () => {
+  test("file + approve creates an unspent permit; validation is strict", async () => {
     const root = tmp();
     try {
       initVault(root);
@@ -58,7 +58,7 @@ describe("permit-send requests", () => {
       expect(created).toBe(true);
       // identical pending ask dedupes
       expect(fileRequest(root, { kind: "permit-send", to: TO, amount: 5000 }).request.id).toBe(request.id);
-      approveRequest(root, request.id);
+      await approveRequest(root, request.id);
       const permits = listPermits(root);
       expect(permits).toHaveLength(1);
       expect(permits[0]).toMatchObject({ id: request.id, to: TO, amount: 5000, status: "unspent", reason: "pay the merchant" });
@@ -85,7 +85,7 @@ describe("sendPayment honors one-time permits", () => {
     const root = tmp();
     try {
       initVault(root); // empty allowlist: every send denied
-      const id = approvePermit(root, TO, 5000);
+      const id = await approvePermit(root, TO, 5000);
       const first = await sendPayment({ root, to: TO, amount: 5000, ...funded(root) });
       expect(first.ok).toBe(true);
       const spent = listPermits(root);
@@ -107,7 +107,7 @@ describe("sendPayment honors one-time permits", () => {
     const root = tmp();
     try {
       initVault(root); // cap 10,000
-      approvePermit(root, TO, 25_000);
+      await approvePermit(root, TO, 25_000);
       const result = await sendPayment({ root, to: TO, amount: 25_000, ...funded(root) });
       expect(result.ok).toBe(true);
     } finally {
@@ -120,7 +120,7 @@ describe("sendPayment honors one-time permits", () => {
     try {
       initVault(root);
       allowDestination(root, TO);
-      approvePermit(root, TO, 5000);
+      await approvePermit(root, TO, 5000);
       const result = await sendPayment({ root, to: TO, amount: 5000, ...funded(root) });
       expect(result.ok).toBe(true);
       expect(listPermits(root)[0]!.status).toBe("unspent");
@@ -133,7 +133,7 @@ describe("sendPayment honors one-time permits", () => {
     const root = tmp();
     try {
       initVault(root);
-      approvePermit(root, TO, 5000);
+      await approvePermit(root, TO, 5000);
       killVault(root);
       let fetched = false;
       const result = await sendPayment({
@@ -158,7 +158,7 @@ describe("sendPayment honors one-time permits", () => {
     const root = tmp();
     try {
       initVault(root);
-      approvePermit(root, TO, 5000);
+      await approvePermit(root, TO, 5000);
       const broke = await sendPayment({
         root,
         to: TO,
@@ -181,7 +181,7 @@ describe("sendPayment honors one-time permits", () => {
     const root = tmp();
     try {
       initVault(root);
-      approvePermit(root, TO, 5000);
+      await approvePermit(root, TO, 5000);
       for (const attempt of [
         { to: TO, amount: 5001 },
         { to: OTHER, amount: 5000 },
@@ -199,7 +199,7 @@ describe("sendPayment honors one-time permits", () => {
     const root = tmp();
     try {
       initVault(root);
-      const id = approvePermit(root, TO, 5000);
+      const id = await approvePermit(root, TO, 5000);
       const revoked = revokePermit(root, id);
       expect(revoked.status).toBe("revoked");
       const result = await sendPayment({ root, to: TO, amount: 5000, ...funded(root) });
@@ -215,8 +215,8 @@ describe("sendPayment honors one-time permits", () => {
     const root = tmp();
     try {
       initVault(root);
-      const first = approvePermit(root, TO, 5000);
-      const second = approvePermit(root, TO, 5000);
+      const first = await approvePermit(root, TO, 5000);
+      const second = await approvePermit(root, TO, 5000);
       await sendPayment({ root, to: TO, amount: 5000, ...funded(root) });
       const permits = listPermits(root);
       expect(permits.find((p) => p.id === first)!.status).toBe("spent");

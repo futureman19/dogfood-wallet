@@ -10,6 +10,7 @@ import {
   usageFromLog,
   parseGrydPolicy,
   parsePopnlocksPolicy,
+  parseOspPolicy,
   parseBtcPolicy,
   parseDogePolicy,
   type BridgePolicy,
@@ -35,6 +36,7 @@ export function vaultPaths(root: string) {
     allowances: join(root, "allowances"),
     requests: join(root, "requests"),
     permits: join(root, "permits"),
+    ospDoors: join(root, "osp-doors"),
   };
 }
 
@@ -177,6 +179,7 @@ export function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
     bridge: parseBridgeBlock(parsed.bridge),
     gryd: parseGrydPolicy(parsed.gryd),
     popnlocks: parsePopnlocksPolicy(parsed.popnlocks),
+    osp: parseOspPolicy(parsed.osp),
     btc: parseBtcPolicy(parsed.btc),
     doge: parseDogePolicy(parsed.doge),
   };

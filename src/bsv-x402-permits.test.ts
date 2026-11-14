@@ -16,15 +16,15 @@ const payTo = "1GjcRUKdwqsnrxCHiDoHtF57rKqDd8oibT";
 const other = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2";
 const url = "https://merchant.example/permit";
 
-async function fixture(run: (f: ReturnType<typeof setup>) => Promise<void>) {
+async function fixture(run: (f: Awaited<ReturnType<typeof setup>>) => Promise<void>) {
   const root = mkdtempSync(join(tmpdir(), "dogfood-x402-permits-"));
-  try { await run(setup(root)); } finally { rmSync(root, { recursive: true, force: true }); }
+  try { await run(await setup(root)); } finally { rmSync(root, { recursive: true, force: true }); }
 }
-function setup(root: string) {
+async function setup(root: string) {
   initVault(root);
   const vault = loadVault(root);
   const { request } = fileRequest(root, { kind: "permit-send", to: payTo, amount: 500 });
-  approveRequest(root, request.id);
+  await approveRequest(root, request.id);
   const coin = new Transaction();
   coin.addInput({ sourceTXID: "00".repeat(32), sourceOutputIndex: 0xffffffff, unlockingScript: Script.fromASM("OP_0") });
   coin.addOutput({ satoshis: 2000, lockingScript: new P2PKH().lock(vault.address) });

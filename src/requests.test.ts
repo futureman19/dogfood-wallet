@@ -60,33 +60,33 @@ describe("requests", () => {
     }
   });
 
-  test("approve allow-destination mutates the real allowlist and marks the request", () => {
+  test("approve allow-destination mutates the real allowlist and marks the request", async () => {
     const root = tmp();
     try {
       initVault(root);
       const { request } = fileRequest(root, { kind: "allow-destination", address: DEST });
-      const done = approveRequest(root, request.id);
+      const done = await approveRequest(root, request.id);
       expect(done.status).toBe("approved");
       expect(done.decidedAt).toBeTruthy();
       const policy = JSON.parse(readFileSync(vaultPaths(root).policy, "utf8"));
       expect(policy.allowlist).toContain(DEST);
       expect(loadVault(root).policy.allowlist).toContain(DEST);
       // decided requests are not re-decidable
-      expect(() => approveRequest(root, request.id)).toThrow(/not pending/);
+      await expect(approveRequest(root, request.id)).rejects.toThrow(/not pending/);
       expect(() => denyRequest(root, request.id)).toThrow(/not pending/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  test("approve raise-cap splices policy.json in place and preserves unknown fields", () => {
+  test("approve raise-cap splices policy.json in place and preserves unknown fields", async () => {
     const root = tmp();
     try {
       initVault(root);
       const raw = JSON.parse(readFileSync(vaultPaths(root).policy, "utf8"));
       writeFileSync(vaultPaths(root).policy, JSON.stringify({ ...raw, futureField: { keep: [1, 2] } }, null, 2) + "\n");
       const { request } = fileRequest(root, { kind: "raise-cap", field: "maxSatsPerTx", value: 25000 });
-      approveRequest(root, request.id);
+      await approveRequest(root, request.id);
       const text = readFileSync(vaultPaths(root).policy, "utf8");
       const policy = JSON.parse(text);
       expect(policy.maxSatsPerTx).toBe(25000);
@@ -99,13 +99,13 @@ describe("requests", () => {
     }
   });
 
-  test("approve raise-cap to null clears an optional cap", () => {
+  test("approve raise-cap to null clears an optional cap", async () => {
     const root = tmp();
     try {
       initVault(root);
       expect(loadVault(root).policy.maxSatsPerDay).toBe(50_000);
       const { request } = fileRequest(root, { kind: "raise-cap", field: "maxSatsPerDay", value: null });
-      approveRequest(root, request.id);
+      await approveRequest(root, request.id);
       expect(JSON.parse(readFileSync(vaultPaths(root).policy, "utf8")).maxSatsPerDay).toBeNull();
       expect(loadVault(root).policy.maxSatsPerDay).toBeNull();
     } finally {
@@ -133,13 +133,13 @@ describe("requests", () => {
     }
   });
 
-  test("unknown or malformed ids are rejected without touching the fs", () => {
+  test("unknown or malformed ids are rejected without touching the fs", async () => {
     const root = tmp();
     try {
       initVault(root);
-      expect(() => approveRequest(root, "not-a-uuid")).toThrow(/Invalid request id/);
-      expect(() => approveRequest(root, "../../../etc/passwd")).toThrow(/Invalid request id/);
-      expect(() => approveRequest(root, "00000000-0000-0000-0000-000000000000")).toThrow(/not found/);
+      await expect(approveRequest(root, "not-a-uuid")).rejects.toThrow(/Invalid request id/);
+      await expect(approveRequest(root, "../../../etc/passwd")).rejects.toThrow(/Invalid request id/);
+      await expect(approveRequest(root, "00000000-0000-0000-0000-000000000000")).rejects.toThrow(/not found/);
       expect(() => denyRequest(root, "00000000-0000-0000-0000-000000000000")).toThrow(/not found/);
     } finally {
       rmSync(root, { recursive: true, force: true });

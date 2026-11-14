@@ -169,6 +169,43 @@ export function createServer(root: string) {
   );
 
   server.registerTool(
+    "request_osp_grant",
+    {
+      description:
+        "Escalate to the human: ask for an Open and Shut Protocol door grant. You compose the EXACT canonical scope blob (OSP-0002: sorted keys, 128-bit lowercase-hex salt, optional payment {amount_sats,address}); approval signs and broadcasts those exact bytes — nothing can be widened after. Identical pending asks dedupe. Signing is human-only via the CLI.",
+      inputSchema: {
+        door: z.string().describe("Vault-owned door name (see osp_doors)"),
+        scopeCanonical: z.string().describe("Canonical OSP-0002 scope blob — the exact bytes the human signs"),
+        expiryHeight: z.number().int().positive().optional().describe("Absolute BSV block height the grant dies at"),
+        maxEgressBytes: z.number().int().positive().optional().describe("Response byte cap for the session"),
+        sessionPubHex: z.string().optional().describe("Your 33-byte compressed session pubkey, lowercase hex"),
+        reason: z.string().optional().describe("Single line, max 280 bytes"),
+      },
+    },
+    async ({ door, scopeCanonical, expiryHeight, maxEgressBytes, sessionPubHex, reason }) => {
+      const { fileRequest } = await import("./requests");
+      try {
+        return text(fileRequest(root, { kind: "osp-grant", door, scopeCanonical, expiryHeight, maxEgressBytes, sessionPubHex, reason }));
+      } catch (e) {
+        return text({ ok: false, error: e instanceof Error ? e.message : String(e) }, true);
+      }
+    },
+  );
+
+  server.registerTool(
+    "osp_doors",
+    {
+      description: "List this vault's OSP doors (name, status, genesis txid, tracked tip). Read-only; public on-chain data only.",
+    },
+    async () => {
+      const { listOspDoors } = await import("./osp");
+      return text(listOspDoors(root).map((d) => ({
+        name: d.name, status: d.status, genesis: d.genesisDisplayTxid, tip: d.tip, transitions: d.seen.length,
+      })));
+    },
+  );
+
+  server.registerTool(
     "requests",
     {
       description: "List your filed escalation requests and their status (pending/approved/denied). Approving or denying is human-only and never on MCP.",
