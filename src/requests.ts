@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Utils } from "@bsv/sdk";
 import { allowDestination, updatePolicyCap, vaultPaths } from "./vault";
 import { issuePermit } from "./permits";
-import { canonicalScope } from "./osp-scope";
+import { canonicalScope, scopePayment } from "./osp-scope";
 
 /**
  * Human-in-the-loop escalation: an agent that hits a policy denial FILES a
@@ -156,7 +156,7 @@ function validate(input: { kind: RequestKind; address?: unknown; field?: unknown
       invalid("scopeCanonical must be a non-empty canonical scope blob of at most 4096 bytes");
     }
     try {
-      canonicalScope(input.scopeCanonical); // the exact door-side validation; the bytes are the ask
+      scopePayment(canonicalScope(input.scopeCanonical)); // canonical bytes plus wallet-supported payment policy
     } catch (e) {
       invalid(e instanceof Error ? e.message : String(e));
     }

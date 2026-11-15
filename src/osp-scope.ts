@@ -50,13 +50,16 @@ export function scopeHashHex(canonicalBlobStr: string): string {
   return createHash("sha256").update(canonicalBlobStr, "utf8").digest("hex");
 }
 
-/** OSP-0005 §4: payment terms, when present, ride inside the scope blob. */
+/** OSP-0005 payment terms, restricted to the wallet's canonical P2PKH profile.
+ * The protocol permits broader locking scripts; this wallet does not. */
 export function scopePayment(obj: Record<string, unknown>): { amount_sats: number; script: string } | undefined {
   const pay = obj.payment;
   if (pay === undefined) return undefined;
   if (typeof pay !== "object" || pay === null || Array.isArray(pay)) throw new Error("malformed payment terms");
   const p = pay as Record<string, unknown>;
   if (!Number.isSafeInteger(p.amount_sats) || (p.amount_sats as number) < 1) throw new Error("malformed payment terms");
-  if (typeof p.script !== "string" || !/^[0-9a-f]+$/.test(p.script)) throw new Error("malformed payment terms");
+  if (typeof p.script !== "string" || !/^76a914[0-9a-f]{40}88ac$/.test(p.script)) {
+    throw new Error("Unsupported payment script: wallet requires canonical lowercase P2PKH (25 bytes)");
+  }
   return { amount_sats: p.amount_sats as number, script: p.script };
 }

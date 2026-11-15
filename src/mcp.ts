@@ -172,7 +172,7 @@ export function createServer(root: string) {
     "request_osp_grant",
     {
       description:
-        "Escalate to the human: ask for an Open and Shut Protocol door grant. You compose the EXACT canonical scope blob (OSP-0002: sorted keys, 128-bit lowercase-hex salt, optional payment {amount_sats,address}); approval signs and broadcasts those exact bytes — nothing can be widened after. Identical pending asks dedupe. Signing is human-only via the CLI.",
+        "Escalate to the human: ask for an Open and Shut Protocol door grant. You compose the EXACT canonical scope blob (OSP-0002: sorted keys, 128-bit lowercase-hex salt, optional payment {amount_sats,script}; this wallet accepts only canonical lowercase 25-byte P2PKH script hex, not an address); approval signs and broadcasts those exact bytes — nothing can be widened after. Identical pending asks dedupe. Signing is human-only via the CLI.",
       inputSchema: {
         door: z.string().describe("Vault-owned door name (see osp_doors)"),
         scopeCanonical: z.string().describe("Canonical OSP-0002 scope blob — the exact bytes the human signs"),

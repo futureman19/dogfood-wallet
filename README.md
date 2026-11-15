@@ -170,6 +170,19 @@ codecs are byte-pinned to the audited upstream golden vectors
 terms as `{amount_sats, script}` inside the signed scope — one spend pays the
 door's payee and opens the session atomically.
 
+**Wallet payment restriction:** paid scopes must use a canonical 25-byte P2PKH
+locking script: `76a914` + 40 lowercase hex characters + `88ac`, and a positive
+safe-integer `amount_sats`. The raw CLI scope, request queue and MCP
+`request_osp_grant` use `{amount_sats, script}`, **not** `{amount_sats, address}`.
+Unsupported scripts are rejected at filing and again before signer key/chain
+access, without normalizing or rewriting the committed bytes. This is a narrower
+wallet-supported subset of OSP-0005, not a protocol requirement: P2SH, arbitrary
+scripts, nonminimal pushes, and OP_RETURN/envelope-like outputs are unsupported.
+Envelope-like payments can interfere with the door's exactly-one-envelope scan;
+hex syntax alone is not safe payment validation. Existing tip/change destination
+ambiguity checks still apply; unpaid grants remain supported. This validates
+script shape, not payee key control, service delivery or live door acceptance.
+
 Signing is disabled unless `policy.json` carries an explicit block (absent =
 fail-closed):
 
