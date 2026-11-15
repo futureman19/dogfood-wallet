@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { approveRequest, fileRequest } from "./requests";
 import { bytesToHex, decode, hexToBytes, reverseHexBytes } from "./osp-envelope";
 import { jcs, scopeHashHex } from "./osp-scope";
 import { ospAddress, ospTipScriptHex } from "./osp-address";
+import { inspectPaymentHold } from "./payment-guard";
 import { mockFetch } from "./test-support/fetch";
 
 const WOC = "https://api.whatsonchain.com/v1/bsv/main";
@@ -273,6 +274,173 @@ describe("OSP door lifecycle on a mock chain (real signing, real guard, mock WoC
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("OSP pre-decryption and actual signer boundaries", () => {
+  const operations = ["init", "grant", "revoke"] as const;
+  function invoke(op: typeof operations[number], root: string, fetchFn: typeof fetch, extra = {}) {
+    if (op === "init") return doorInit({ root, name: "new-door", fetchFn });
+    if (op === "revoke") return revokeOspDoor({ root, door: "bench", fetchFn });
+    return signOspGrant({ root, door: "bench", scopeCanonical: UNPAID_SCOPE, sessionPubHex: SESSION_PUB, fetchFn, ...extra });
+  }
+  for (const op of operations) {
+    for (const refusal of ["absent", "malformed", "kill", "fee-cap", "day"] as const) {
+      test(`${op}: ${refusal} rejects with unusable encrypted key material`, async () => {
+        const root = tmp();
+        try {
+          const f = fundedVault(root);
+          if (op !== "init") await doorInit({ root, name: "bench", fetchFn: f.fetchFn });
+          const raw = JSON.parse(readFileSync(vaultPaths(root).policy, "utf8"));
+          if (refusal === "absent") delete raw.osp;
+          if (refusal === "malformed") raw.osp.maxSatsPerTx = -1;
+          if (refusal === "fee-cap") raw.osp.maxSatsPerTx = 1;
+          if (refusal === "day") {
+            raw.osp.maxSatsPerDay = 1;
+            writeFileSync(vaultPaths(root).log, JSON.stringify({ t: new Date().toISOString(), asset: "bsv", kind: "osp-grant", amount: 2, fee: 0 }) + "\n");
+          }
+          writeFileSync(vaultPaths(root).policy, JSON.stringify(raw));
+          if (refusal === "kill") killVault(root);
+          // A decrypt attempt deterministically fails at createDecipheriv, not policy.
+          writeFileSync(vaultPaths(root).wrap, "invalid AES key");
+          let reads = 0, mutations = 0;
+          const fetchFn = mockFetch(async (url, init) => {
+            if (init?.method && init.method !== "GET") { mutations++; throw Error("MUTATION_FORBIDDEN"); }
+            reads++; return f.fetchFn(url, init);
+          });
+          const signing = spyOn(Transaction.prototype, "sign");
+          try {
+            await expect(invoke(op, root, fetchFn)).rejects.toThrow(refusal === "absent" ? /no osp policy/ : refusal === "kill" ? /STOP_SPENDING/ : refusal === "day" ? /maxSatsPerDay/ : /osp.maxSatsPerTx/);
+            expect(signing).not.toHaveBeenCalled();
+            expect(mutations).toBe(0);
+            if (refusal !== "fee-cap") expect(reads).toBe(0);
+            expect(inspectPaymentHold(root).blocked).toBe(false);
+          } finally { signing.mockRestore(); }
+        } finally { rmSync(root, { recursive: true, force: true }); }
+      });
+    }
+    test(`${op}: kill after key loading at unlock-template construction never enters signer`, async () => {
+      const root = tmp();
+      try {
+        const f = fundedVault(root);
+        if (op !== "init") await doorInit({ root, name: "bench", fetchFn: f.fetchFn });
+        const original = P2PKH.prototype.unlock;
+        const unlocking = spyOn(P2PKH.prototype, "unlock").mockImplementation(function (this: P2PKH, ...args) {
+          killVault(root);
+          return original.apply(this, args);
+        });
+        const signing = spyOn(Transaction.prototype, "sign");
+        const before = f.state.broadcasts.length;
+        try {
+          await expect(invoke(op, root, f.fetchFn)).rejects.toThrow(/STOP_SPENDING/);
+          expect(unlocking).toHaveBeenCalled();
+          expect(signing).not.toHaveBeenCalled();
+          expect(f.state.broadcasts).toHaveLength(before);
+          // Reservation is conservative: even this unsigned failure stays held.
+          expect(inspectPaymentHold(root).pending).toBe("valid");
+          expect(inspectPaymentHold(root).blocked).toBe(true);
+        } finally { unlocking.mockRestore(); signing.mockRestore(); }
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    });
+    test(`${op}: ambiguous signed broadcast preserves evidence and blocks another signer entry`, async () => {
+      const root = tmp();
+      try {
+        const f = fundedVault(root);
+        if (op !== "init") await doorInit({ root, name: "bench", fetchFn: f.fetchFn });
+        let mutations = 0;
+        const fetchFn = mockFetch(async (url, init) => {
+          if (init?.method === "POST") {
+            mutations++;
+            return Response.json({ txid: "ff".repeat(32), txStatus: "SEEN_ON_NETWORK" });
+          }
+          return f.fetchFn(url, init);
+        });
+        const signing = spyOn(Transaction.prototype, "sign");
+        try {
+          await expect(invoke(op, root, fetchFn)).rejects.toThrow(/Ambiguous/);
+          expect(signing).toHaveBeenCalledTimes(1);
+          const hold = inspectPaymentHold(root);
+          expect(hold.pending).toBe("valid");
+          expect(hold.blocked).toBe(true);
+          const evidence = readFileSync(join(root, "osp-sends", hold.intent!.id + ".json"), "utf8");
+          expect(JSON.parse(evidence).rawTx).toMatch(/^[0-9a-f]+$/);
+          await expect(invoke(op, root, fetchFn)).rejects.toThrow(/active or unresolved/);
+          expect(signing).toHaveBeenCalledTimes(1);
+          expect(mutations).toBe(1);
+          expect(readFileSync(join(root, "osp-sends", hold.intent!.id + ".json"), "utf8")).toBe(evidence);
+        } finally { signing.mockRestore(); }
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    });
+    for (const timing of ["first", "last"] as const) {
+      test(`${op}: STOP_SPENDING during ${timing} async read blocks actual signing`, async () => {
+        const root = tmp();
+        try {
+          const f = fundedVault(root);
+          if (op !== "init") await doorInit({ root, name: "bench", fetchFn: f.fetchFn });
+          let reads = 0, mutations = 0, injected = false;
+          const fetchFn = mockFetch(async (url, init) => {
+            if (init?.method && init.method !== "GET") { mutations++; throw Error("MUTATION_FORBIDDEN"); }
+            reads++;
+            const response = await f.fetchFn(url, init);
+            if ((timing === "first" && reads === 1) || (timing === "last" && (op === "init" ? reads === 3 : String(url).endsWith(`/tx/${f.state.tip!.txid}/hex`)))) {
+              killVault(root); injected = true;
+            }
+            return response;
+          });
+          const signing = spyOn(Transaction.prototype, "sign");
+          try {
+            await expect(invoke(op, root, fetchFn)).rejects.toThrow(/STOP_SPENDING/);
+            expect(injected).toBe(true);
+            expect(signing).not.toHaveBeenCalled();
+            expect(mutations).toBe(0);
+          } finally { signing.mockRestore(); }
+        } finally { rmSync(root, { recursive: true, force: true }); }
+      });
+    }
+  }
+  for (const op of ["grant", "revoke"] as const) {
+    test(`${op}: closed door rejected before decryption`, async () => {
+      const root = tmp();
+      try {
+        const f = fundedVault(root);
+        await doorInit({ root, name: "bench", fetchFn: f.fetchFn });
+        const door = loadOspDoor(root, "bench");
+        writeFileSync(join(vaultPaths(root).ospDoors, "bench.json"), JSON.stringify({ ...door, status: "closed", tip: null }));
+        writeFileSync(vaultPaths(root).wrap, "invalid AES key");
+        await expect(invoke(op, root, mockFetch(async () => { throw Error("NETWORK_FORBIDDEN"); }))).rejects.toThrow(/closed/);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    });
+  }
+  for (const invalid of ["session", "tip-payment", "change-payment", "brc181", "payment-cap"] as const) {
+    test(`grant: ${invalid} rejected before decryption`, async () => {
+      const root = tmp();
+      try {
+        const f = fundedVault(root);
+        await doorInit({ root, name: "bench", fetchFn: f.fetchFn });
+        writeFileSync(vaultPaths(root).wrap, "invalid AES key");
+        const extra: { sessionPubHex?: string; scopeCanonical?: string } = {};
+        if (invalid === "session") extra.sessionPubHex = "02" + "ff".repeat(32);
+        else extra.scopeCanonical = paidScope(invalid === "tip-payment" ? f.tipScript : invalid === "change-payment" ? f.vaultScript : new P2PKH().lock(PrivateKey.fromHex("02").toAddress()).toHex());
+        if (invalid === "brc181") writeFileSync(vaultPaths(root).brc181, "{}");
+        if (invalid === "payment-cap") writeFileSync(vaultPaths(root).policy, JSON.stringify({ osp: { maxSatsPerTx: 5, maxSatsPerDay: null } }));
+        await expect(invoke("grant", root, mockFetch(async () => { throw Error("NETWORK_FORBIDDEN"); }), extra)).rejects.toThrow(invalid === "session" ? /OSP-0002/ : invalid === "brc181" ? /BRC|policy|envelope/i : invalid === "payment-cap" ? /maxSatsPerTx/ : /ambiguity/);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    });
+  }
+  test("revoke remains allowed with ordinary deny-all and malformed paid-grant BRC policy", async () => {
+    const root = tmp();
+    try {
+      const f = fundedVault(root);
+      await doorInit({ root, name: "bench", fetchFn: f.fetchFn });
+      writeFileSync(vaultPaths(root).brc181, "{}");
+      const signing = spyOn(Transaction.prototype, "sign");
+      try {
+        await revokeOspDoor({ root, door: "bench", fetchFn: f.fetchFn });
+        expect(signing).toHaveBeenCalledTimes(1);
+        expect(loadOspDoor(root, "bench").status).toBe("closed");
+        expect(inspectPaymentHold(root).blocked).toBe(false);
+      } finally { signing.mockRestore(); }
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });
 

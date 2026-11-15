@@ -202,6 +202,34 @@ reconciliation rather than signing over drift. After `osp init`, register the
 printed `{genesisDisplayTxid, tipLockingScriptHex}` with your door service (the
 protocol repo's reference door is `osp-door.futureman19.workers.dev`).
 
+**Signing safeguards:** init, grant and revoke acquire the shared payment guard
+before reading policy/usage. Disabled/malformed OSP policy, an existing killfile,
+and already-exceeded daily usage reject before vault key decryption or chain
+reads. Grant scope/payment/session validation, closed-door checks and known
+payment-only caps/BRC-181 denials also precede decryption. Fee-inclusive gates
+and existing funding/tip source checks run using public metadata before key
+loading; after asynchronous reads, gates run again. Metadata is not signing
+identity: the loaded key must still match `address.txt`, the address used for
+funding reads, and (grant/revoke) the tracked door owner before signing.
+
+All three operations check `STOP_SPENDING` again immediately before entering
+`Transaction.sign()`, after durable reservation, with no intervening await.
+A killfile observed during pre-sign reads prevents **signing**, not merely
+broadcast. A refusal before reservation releases the execution lock; failures
+after reservation retain it conservatively, even if no signature was produced.
+Signed evidence and ambiguous acknowledgements remain held with no automatic
+retry; request decision claims are separate and remain permanent.
+
+These checks are not an atomic filesystem/signature transaction: a killfile
+created after the final check cannot cancel an already-entered SDK signer or
+retract signed bytes. There is no new post-sign kill/broadcast guarantee here.
+Policy writers must stop spenders before editing configuration; the payment
+lock serializes cooperating spenders, not external editors. Revoke retains its
+existing OSP cap/kill gates, **not** the ordinary allowlist or paid-grant BRC-181
+gates; it is not an emergency killfile bypass. Fee formulas, tip-value accounting,
+transport fallback behavior and protocol bytes are unchanged by these safeguards.
+Local tests use disposable vaults and intercepted transport, not live settlement.
+
 ## Embed it (library exports)
 
 Agent frameworks can use the wallet **in-process**, no CLI or MCP transport

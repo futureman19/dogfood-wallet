@@ -4,16 +4,16 @@
 // main vault address (never the tip script — OSP-0001 ambiguity rule).
 //
 // Discipline mirrors btc.ts/gryd-mint: policy gate BEFORE signing, payment
-// guard reservation BEFORE key exposure, fsynced evidence BEFORE broadcast,
+// guard reservation BEFORE signing, fsynced evidence BEFORE broadcast,
 // ambiguous broadcast acknowledgement = HOLD, never retry. The envelope/scope
 // bytes are byte-pinned to the audited upstream vectors (testdata/osp-vectors.json).
 
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { closeSync, fsyncSync, openSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { P2PKH, PrivateKey, Script, Transaction } from "@bsv/sdk";
-import { loadUsage, loadVault, vaultPaths } from "./vault";
+import { loadUsage, loadVault, parseStoredPolicy, vaultPaths } from "./vault";
 import { estimateFee, evaluateOspTransition } from "./policy";
 import { loadPolicyEnvelope, gateAgentSend } from "./brc181";
 import { withPaymentGuard } from "./payment-guard";
@@ -25,6 +25,30 @@ import { ospAddress, ospKey, ospTipScriptHex } from "./osp-address";
 
 export const OSP_DEFAULT_EXPIRY = 1_000_000;
 export const OSP_DEFAULT_EGRESS = 65_536;
+
+// Match the fail-closed killfile check used by the capped partial signer.
+function checkKill(root: string): void {
+  try { lstatSync(vaultPaths(root).kill); }
+  catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return; throw e; }
+  throw new Error("REJECTED: STOP_SPENDING is on.");
+}
+function gateOsp(root: string, total: number): void {
+  checkKill(root);
+  const path = vaultPaths(root).policy;
+  const policy = existsSync(path) ? parseStoredPolicy(readFileSync(path, "utf8"), false).osp : undefined;
+  const decision = evaluateOspTransition(policy, false, total, loadUsage(root, new Date(), "osp"));
+  if (!decision.ok) throw new Error(decision.message);
+}
+function gatePaidGrant(root: string, payment: NonNullable<ReturnType<typeof scopePayment>>, fee: number): void {
+  const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
+  if (!loaded.ok) throw new Error(loaded.message);
+  const decision = gateAgentSend({
+    envelope: loaded.envelope, lockingScriptHex: payment.script,
+    amount: payment.amount_sats, fee,
+    spentTotal: loadUsage(root, new Date(), "brc181-bsv").spentLifetime,
+  });
+  if (!decision.ok) throw new Error(decision.message);
+}
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
@@ -145,22 +169,28 @@ export async function doorInit(opts: {
   doorPath(root, name); // validates the name
   if (existsSync(doorPath(root, name))) throw new Error("OSP door already exists: " + name);
   return withPaymentGuard(root, "osp-door-init", async (guard) => {
-    const vault = loadVault(root);
-    // Fail fast BEFORE any network access: DISABLED / KILL never reach the chain.
-    const pre = evaluateOspTransition(vault.policy.osp, vault.policy.killfileOn, 0, loadUsage(root, new Date(), "osp"));
-    if (!pre.ok) throw new Error(pre.message);
-    const owner = ospAddress(vault.key);
-    const tipScriptHex = ospTipScriptHex(vault.key);
-    const vaultScriptHex = new P2PKH().lock(vault.address).toHex();
+    gateOsp(root, 0);
+    const address = readFileSync(vaultPaths(root).address, "utf8").trim();
+    const vaultScriptHex = new P2PKH().lock(address).toHex();
 
     const need = 1; // the tip itself; fee added by the selector
-    const funded = await fundFromVault(root, vault.address, vaultScriptHex, need, fetchFn);
+    const funded = await fundFromVault(root, address, vaultScriptHex, need, fetchFn);
     const fee = estimateFee(funded.inputs.length, 2);
     const change = funded.total - need - fee;
     if (change < 0) throw new Error("REJECTED: Insufficient vault funds for OSP door genesis.");
 
-    const gate = evaluateOspTransition(vault.policy.osp, vault.policy.killfileOn, fee, loadUsage(root, new Date(), "osp"));
-    if (!gate.ok) throw new Error(gate.message);
+    // Fresh funding liveness immediately pre-sign.
+    const fresh = await defaultFetchUtxos(address, fetchFn);
+    for (const u of funded.inputs) {
+      if (!fresh.some((r) => r.tx_hash === u.tx_hash && r.tx_pos === u.tx_pos && r.value === u.value)) {
+        throw new Error("OSP funding spent or changed");
+      }
+    }
+    gateOsp(root, fee);
+    const vault = loadVault(root);
+    if (vault.address !== address) throw new Error("Vault address changed during validation");
+    const owner = ospAddress(vault.key);
+    const tipScriptHex = ospTipScriptHex(vault.key);
 
     const tx = new Transaction();
     for (let i = 0; i < funded.inputs.length; i++) {
@@ -174,14 +204,8 @@ export async function doorInit(opts: {
     tx.addOutput({ satoshis: 1, lockingScript: Script.fromHex(tipScriptHex) });
     if (change > 1) tx.addOutput({ satoshis: change, lockingScript: Script.fromHex(vaultScriptHex) });
 
-    // Fresh funding liveness immediately pre-sign.
-    const fresh = await defaultFetchUtxos(vault.address, fetchFn);
-    for (const u of funded.inputs) {
-      if (!fresh.some((r) => r.tx_hash === u.tx_hash && r.tx_pos === u.tx_pos && r.value === u.value)) {
-        throw new Error("OSP funding spent or changed");
-      }
-    }
     guard.reserve({ asset: "bsv", amount: 0, to: tipScriptHex, fee });
+    checkKill(root); // No intervening await between the fresh kill check and signer entry.
     await tx.sign();
     const rawTx = tx.toHex();
     const txid = tx.id("hex");
@@ -231,15 +255,13 @@ export async function signOspGrant(opts: {
   const payment = scopePayment(scopeObj);
 
   return withPaymentGuard(root, "osp-grant", async (guard) => {
-    const vault = loadVault(root);
-    const pre = evaluateOspTransition(vault.policy.osp, vault.policy.killfileOn, 0, loadUsage(root, new Date(), "osp"));
-    if (!pre.ok) throw new Error(pre.message);
-    const owner = ospAddress(vault.key);
+    gateOsp(root, 0);
     const door = loadOspDoor(root, opts.door);
     if (door.status !== "open" || !door.tip) throw new Error("OSP door is permanently closed: " + opts.door);
-    if (door.ownerAddress !== owner) throw new Error("OSP door belongs to a different vault key");
+    const owner = door.ownerAddress;
+    const address = readFileSync(vaultPaths(root).address, "utf8").trim();
     const tipScript = Script.fromHex(door.tipScriptHex);
-    const vaultScriptHex = new P2PKH().lock(vault.address).toHex();
+    const vaultScriptHex = new P2PKH().lock(address).toHex();
     if (payment && (payment.script === door.tipScriptHex || payment.script === vaultScriptHex)) {
       throw new Error("REJECTED: OSP-0005 payment must not target the tip or change script (output-count ambiguity).");
     }
@@ -257,8 +279,10 @@ export async function signOspGrant(opts: {
     }
 
     const paymentSats = payment ? payment.amount_sats : 0;
+    gateOsp(root, paymentSats);
+    if (payment) gatePaidGrant(root, payment, 0);
     const need = paymentSats;
-    const funded = await fundFromVault(root, vault.address, vaultScriptHex, need, fetchFn);
+    const funded = await fundFromVault(root, address, vaultScriptHex, need, fetchFn);
 
     const envelope = encodeGrant({
       doorId: hexToBytes(reverseHexBytes(door.genesisDisplayTxid)),
@@ -280,20 +304,8 @@ export async function signOspGrant(opts: {
       change = 0;
     }
 
-    const gate = evaluateOspTransition(vault.policy.osp, vault.policy.killfileOn, paymentSats + fee, loadUsage(root, new Date(), "osp"));
-    if (!gate.ok) throw new Error(gate.message);
-    if (payment) {
-      const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
-      if (!loaded.ok) throw new Error(loaded.message);
-      const d = gateAgentSend({
-        envelope: loaded.envelope,
-        lockingScriptHex: payment.script,
-        amount: paymentSats,
-        fee,
-        spentTotal: loadUsage(root, new Date(), "brc181-bsv").spentLifetime,
-      });
-      if (!d.ok) throw new Error(d.message);
-    }
+    gateOsp(root, paymentSats + fee);
+    if (payment) gatePaidGrant(root, payment, fee);
 
     // Chain truth: the tracked tip must still be an unspent output at the owner address.
     if (!(await tipLive(owner, door.tip, fetchFn))) {
@@ -309,6 +321,12 @@ export async function signOspGrant(opts: {
       || tipOut.lockingScript.toHex() !== door.tipScriptHex) {
       throw new Error("Invalid OSP tip source transaction");
     }
+
+    gateOsp(root, paymentSats + fee);
+    if (payment) gatePaidGrant(root, payment, fee);
+    const vault = loadVault(root);
+    if (vault.address !== address) throw new Error("Vault address changed during validation");
+    if (ospAddress(vault.key) !== owner) throw new Error("OSP door belongs to a different vault key");
 
     const tx = new Transaction();
     // input[0] MUST be the tip spend by the door-owner key (OSP-0001 §5 predicate).
@@ -332,6 +350,7 @@ export async function signOspGrant(opts: {
     if (change > 0) tx.addOutput({ satoshis: change, lockingScript: Script.fromHex(vaultScriptHex) });
 
     guard.reserve({ asset: "bsv", amount: paymentSats, to: door.tipScriptHex, fee });
+    checkKill(root); // No intervening await between the fresh kill check and signer entry.
     await tx.sign();
     const rawTx = tx.toHex();
     const txid = tx.id("hex");
@@ -363,16 +382,14 @@ export async function revokeOspDoor(opts: {
   const { root } = opts;
   const fetchFn = opts.fetchFn ?? globalThis.fetch.bind(globalThis);
   return withPaymentGuard(root, "osp-revoke", async (guard) => {
-    const vault = loadVault(root);
-    const pre = evaluateOspTransition(vault.policy.osp, vault.policy.killfileOn, 0, loadUsage(root, new Date(), "osp"));
-    if (!pre.ok) throw new Error(pre.message);
-    const owner = ospAddress(vault.key);
+    gateOsp(root, 0);
     const door = loadOspDoor(root, opts.door);
     if (door.status !== "open" || !door.tip) throw new Error("OSP door is already closed: " + opts.door);
-    if (door.ownerAddress !== owner) throw new Error("OSP door belongs to a different vault key");
-    const vaultScriptHex = new P2PKH().lock(vault.address).toHex();
+    const owner = door.ownerAddress;
+    const address = readFileSync(vaultPaths(root).address, "utf8").trim();
+    const vaultScriptHex = new P2PKH().lock(address).toHex();
 
-    const funded = await fundFromVault(root, vault.address, vaultScriptHex, 0, fetchFn);
+    const funded = await fundFromVault(root, address, vaultScriptHex, 0, fetchFn);
     const inCount = 1 + funded.inputs.length;
     let fee = estimateFee(inCount, 2); // envelope + change
     let change = funded.total - fee;
@@ -382,8 +399,7 @@ export async function revokeOspDoor(opts: {
       change = 0;
     }
 
-    const gate = evaluateOspTransition(vault.policy.osp, vault.policy.killfileOn, fee, loadUsage(root, new Date(), "osp"));
-    if (!gate.ok) throw new Error(gate.message);
+    gateOsp(root, fee);
 
     if (!(await tipLive(owner, door.tip, fetchFn))) {
       throw new Error("OSP tip was spent externally — reconcile the door file manually; refusing to sign");
@@ -396,6 +412,11 @@ export async function revokeOspDoor(opts: {
       || tipOut.lockingScript.toHex() !== door.tipScriptHex) {
       throw new Error("Invalid OSP tip source transaction");
     }
+
+    gateOsp(root, fee);
+    const vault = loadVault(root);
+    if (vault.address !== address) throw new Error("Vault address changed during validation");
+    if (ospAddress(vault.key) !== owner) throw new Error("OSP door belongs to a different vault key");
 
     const envelope = encodeRevoke({ doorId: hexToBytes(reverseHexBytes(door.genesisDisplayTxid)), flag: 0 });
     const envScript = Script.fromHex(bytesToHex(buildEnvelopeScript(envelope)));
@@ -419,6 +440,7 @@ export async function revokeOspDoor(opts: {
     if (change > 0) tx.addOutput({ satoshis: change, lockingScript: Script.fromHex(vaultScriptHex) });
 
     guard.reserve({ asset: "bsv", amount: 0, to: door.tipScriptHex, fee });
+    checkKill(root); // No intervening await between the fresh kill check and signer entry.
     await tx.sign();
     const rawTx = tx.toHex();
     const txid = tx.id("hex");
