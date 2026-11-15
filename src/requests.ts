@@ -93,6 +93,42 @@ function writeRequestAtomic(path: string, request: PolicyRequest): void {
   }
 }
 
+// Match payment-guard's local-filesystem durability boundary. Windows cannot
+// fsync directories through Node/Bun; file fsync is still mandatory.
+function syncRequestsDirectory(root: string): void {
+  if (process.platform === "win32") return;
+  const fd = openSync(requestsDir(root), "r");
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+
+/** Permanent single-attempt claim shared by approval and denial. Never reclaim
+ * by PID/time or on exception: even a successful signer can lose its response
+ * before the final request write, after the payment guard has been released.
+ * Empty/corrupt claims also exclude all later decisions via exclusive create.
+ */
+function claimDecision(root: string, id: string, action: "approve" | "deny"): PolicyRequest {
+  const request = readRequest(root, id);
+  if (request.status !== "pending") throw new Error("Invalid request: not pending (status " + request.status + ")");
+  const path = requestPath(root, id).replace(/\.json$/, ".decision.lock");
+  let fd: number;
+  try { fd = openSync(path, "wx", 0o600); }
+  catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error("Invalid request: decision held (active or unresolved). Human forensic recovery required; never retry or clear automatically.");
+    }
+    throw e;
+  }
+  // No cleanup, including partial persistence failures or successful decisions.
+  try {
+    writeFileSync(fd, JSON.stringify({ version: 1, id, action, started: new Date().toISOString() }) + "\n");
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
+  syncRequestsDirectory(root);
+  const claimed = readRequest(root, id);
+  if (claimed.status !== "pending") throw new Error("Invalid request: not pending (status " + claimed.status + ")");
+  return claimed;
+}
+
 function readRequest(root: string, id: string): PolicyRequest {
   const path = requestPath(root, id);
   if (!existsSync(path)) throw new Error("Invalid request: not found: " + id);
@@ -220,8 +256,7 @@ export function listRequests(root: string, status?: PolicyRequest["status"]): Po
 
 /** Human-only (CLI): approval executes the SAME mutation as `allow`/policy edit — or issues a one-time send permit. */
 export async function approveRequest(root: string, id: string, opts?: { fetchFn?: typeof fetch }): Promise<PolicyRequest> {
-  const request = readRequest(root, id);
-  if (request.status !== "pending") throw new Error("Invalid request: not pending (status " + request.status + ")");
+  const request = claimDecision(root, id, "approve");
   let decision: string | undefined;
   if (request.kind === "allow-destination") {
     allowDestination(root, request.address!);
@@ -259,8 +294,7 @@ export async function approveRequest(root: string, id: string, opts?: { fetchFn?
 /** Human-only (CLI). */
 export function denyRequest(root: string, id: string, reason?: string): PolicyRequest {
   if (!validReason(reason)) invalid("reason must be a single UTF-8 line of at most " + MAX_REASON_BYTES + " bytes");
-  const request = readRequest(root, id);
-  if (request.status !== "pending") throw new Error("Invalid request: not pending (status " + request.status + ")");
+  const request = claimDecision(root, id, "deny");
   const decided: PolicyRequest = {
     ...request,
     status: "denied",

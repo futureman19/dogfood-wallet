@@ -69,6 +69,47 @@ All vaults were generated, unfunded scratch fixtures. POSIX mode/directory-fsync
 branches are included in tests but were not executed on this Windows host;
 hardware power cuts and native Linux launcher acceptance were not tested here.
 
+## Request decisions and OSP approval recovery
+
+Approval and denial share a permanent, exclusive per-request claim at
+`requests/<id>.decision.lock`. It is created with `wx`, written and fsynced
+before any approval mutation, dynamic signer import or await. Other processes
+fail immediately; they cannot approve or deny the same request concurrently.
+All request kinds use this boundary, without changing their return types.
+Claims remain even after successful decisions. Completed request records are
+terminal; a still-pending record with a claim means **active or unresolved**, not
+permission to retry. Listing remains read-only and reports the stored status;
+identical pending asks still dedupe to that same blocked request.
+
+This is intentionally conservative: every error after acquisition, even a
+pre-sign policy rejection, leaves the request claimed. Empty/corrupt claims,
+process death, ambiguous signer responses and failure to save the final decision
+never release it. The separate payment guard remains unchanged: it can already
+have completed and released its hold before the approval record is saved. Its
+absence does **not** prove the request has not issued a grant/payment.
+
+On failure, stop all decision writers/spenders and preserve the request, claim,
+OSP door history, `osp-sends/`, payment state and spend log. Independently
+reconcile the exact scope, door tip, signed transaction and settlement/accounting
+before any separately reviewed repair. Never delete a claim, deny a held ask to
+re-file it, rebroadcast evidence or automatically retry to discover the outcome.
+No clearing, repair writer or rebroadcast command is provided. Unresolved signed
+exposure must remain held; a missing receipt is not proof of non-payment.
+
+This is cooperative **per-request-ID** exclusion, not global semantic deduplication
+of separately filed requests, direct `osp grant` calls or old binaries. Stop old
+binaries before upgrading; pre-existing pending requests have no retrospective
+proof that they were never signed. Do not retry historically ambiguous requests.
+Local exclusive-create semantics are required, not NFS/distributed/adversarial
+filesystem guarantees. Non-Windows claim-directory fsync is mandatory; Windows
+skips directory fsync (unsupported through Node/Bun) but requires file fsync.
+Process-interruption tests do not establish hardware power-loss durability.
+
+Regression coverage uses isolated subprocesses and a **synthetic signer**, with
+network forbidden: contention, denial exclusion, abrupt exit/kill, lost response,
+final-record write failure and empty/corrupt claims. Existing OSP lifecycle tests
+exercise real local signing with mocked WoC/ARC; neither is live acceptance.
+
 ## Scope (not an all-wallet transaction manager)
 
 `sendPayment` (CLI/MCP send) and shared `payX402` (CLI `x402-pay`, MCP

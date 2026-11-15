@@ -119,6 +119,13 @@ bun src/cli.ts permit-revoke <id>                       # human: revoke an unspe
 MCP tools: `request_allow`, `request_cap`, `request_send`, `requests`.
 Destinations are validated as strict mainnet P2PKH before filing.
 
+Approval and denial are single-attempt decisions protected by a permanent,
+fsynced per-request claim. Concurrent decisions fail closed; any failure after
+claiming leaves the request held, even if it still lists as `pending`. Never
+retry/deny/re-file an unresolved OSP approval: signing may have succeeded before
+the final decision record was saved. There is no automatic clearing or replay.
+See [request decision recovery and limits](docs/payment-recovery.md#request-decisions-and-osp-approval-recovery).
+
 ### One-time payment permits
 
 An approved `permit-send` ask issues a permit (`~/.dogfood-wallet/permits/`)
