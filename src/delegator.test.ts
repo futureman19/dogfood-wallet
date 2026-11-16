@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { P2PKH, PrivateKey, Script, Transaction } from "@bsv/sdk";
 import { DEFAULT_MAX_SATS, type Policy, type Usage } from "./policy";
-import { p2pkhAddressFromLock, type X402Challenge } from "./x402";
+import { p2pkhAddressFromLock, encodeProofHeader, txidFromRawHex, type X402Challenge, type X402Proof } from "./x402";
 import {
   buildClientFundedPartialTx,
   completeDelegation,
@@ -21,6 +21,7 @@ const vectors = JSON.parse(
     challenge?: X402Challenge;
     rawtx_hex?: string;
     txid?: string;
+    proof?: X402Proof;
   }>;
 };
 
@@ -287,6 +288,38 @@ describe("settleX402", () => {
     expect(r.header).toBeTruthy();
     expect(calls).toHaveLength(1);
     expect(calls[0].startsWith("POST http://delegator.example/delegate/x402")).toBe(true);
+  });
+
+  test("settle result proof/header match the frozen v1 shape in both funding modes (vectors[7] key oracle)", async () => {
+    const completed = byName("txid_derivation");
+    // vectors[7] is the negative v:0 vector; its proof is the frozen key-set oracle only.
+    const oracle = required(byName("invalid_proof_version").proof);
+    const fetchFn = mockFetch(async () =>
+      new Response(JSON.stringify({ completed_tx: required(completed.rawtx_hex), txid: required(completed.txid) }), { status: 200 }));
+    for (const fund of [fundingFor([10_000]), undefined]) {
+      const r = await settleX402({
+        policy,
+        usage: ZERO_USAGE,
+        challenge: fund ? ch : challengeWithTemplate(),
+        delegatorUrl: "http://delegator.example",
+        fetchFn,
+        fund,
+        method: "GET",
+        path: "/v1/resource",
+      });
+      expect(r.ok).toBe(true);
+      if (!r.ok) throw new Error(r.message);
+      const p = required(r.proof);
+      expect(Object.keys(p).sort()).toEqual(Object.keys(oracle).sort());
+      expect(Object.keys(p.payment).sort()).toEqual(Object.keys(oracle.payment).sort());
+      expect(Object.keys(p.request).sort()).toEqual(Object.keys(oracle.request).sort());
+      expect(p.v).toBe(1);
+      expect(p.scheme).toBe("bsv-tx-v1");
+      expect(p.payment.rawtx_b64).toBe(Buffer.from(required(completed.rawtx_hex), "hex").toString("base64"));
+      expect(txidFromRawHex(Buffer.from(p.payment.rawtx_b64, "base64").toString("hex"))).toBe(p.payment.txid);
+      expect(r.header).toBe(encodeProofHeader(p));
+      expect(JSON.parse(Buffer.from(r.header, "base64url").toString("utf8"))).toEqual(p);
+    }
   });
 
   test("broadcast:true POSTs the completed tx via broadcastFn", async () => {
