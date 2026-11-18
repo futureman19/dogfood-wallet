@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { evaluateSend, usageFromLog, evaluateSweep, evaluateSplit, evaluateAllowanceFund, planSplit, DEFAULT_MAX_SATS, MIN_SPLIT_PIECE, type Policy } from "./policy";
+import { evaluateSend, usageFromLog, evaluateSweep, evaluateSplit, evaluateAllowanceFund, planSplit, DEFAULT_MAX_SATS, MIN_SPLIT_PIECE, parseMessagesPolicy, evaluateMessageSend, messageCountFromLog, type Policy, type MessagesPolicy } from "./policy";
+import { parseStoredPolicy } from "./vault";
 
 const TO = "1GjcRUKdwqsnrxCHiDoHtF57rKqDd8oibT";
 const OTHER = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
@@ -233,6 +234,143 @@ describe("planSplit", () => {
     expect(p.ok).toBe(false);
     if (p.ok) return;
     expect(p.code).toBe("INSUFFICIENT");
+  });
+});
+
+// ---- S2: policy.messages ----
+
+const MSG: MessagesPolicy = { maxPerDay: 100, maxBodyBytes: 4096, recipients: null };
+
+describe("parseMessagesPolicy", () => {
+  test("absent block means disabled", () => {
+    expect(parseMessagesPolicy(undefined)).toBeUndefined();
+    expect(parseMessagesPolicy(null)).toBeUndefined();
+  });
+
+  test("empty block gets safe defaults", () => {
+    expect(parseMessagesPolicy({})).toEqual({ maxPerDay: 100, maxBodyBytes: 4096, recipients: null });
+  });
+
+  test("full block round-trips", () => {
+    const raw = { maxPerDay: 5, maxBodyBytes: 280, recipients: [TO] };
+    expect(parseMessagesPolicy(raw)).toEqual(raw);
+  });
+
+  test("non-object blocks throw (fail closed)", () => {
+    for (const bad of ["yes", 5, true, []]) expect(() => parseMessagesPolicy(bad)).toThrow();
+  });
+
+  test("malformed maxPerDay throws", () => {
+    for (const bad of [0, -1, 1.5, "5", null]) expect(() => parseMessagesPolicy({ maxPerDay: bad })).toThrow();
+  });
+
+  test("malformed maxBodyBytes throws", () => {
+    for (const bad of [0, -1, 1.5, "4096"]) expect(() => parseMessagesPolicy({ maxBodyBytes: bad })).toThrow();
+  });
+
+  test("recipients must be null or an array of valid mainnet addresses", () => {
+    expect(parseMessagesPolicy({ recipients: null })!.recipients).toBeNull();
+    expect(() => parseMessagesPolicy({ recipients: "1abc" })).toThrow();
+    expect(() => parseMessagesPolicy({ recipients: [5] })).toThrow();
+    expect(() => parseMessagesPolicy({ recipients: ["not-an-address"] })).toThrow();
+    expect(() => parseMessagesPolicy({ recipients: ["3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy"] })).toThrow(); // P2SH
+  });
+
+  test("parseStoredPolicy wires the messages block", () => {
+    const p = parseStoredPolicy(JSON.stringify({ messages: { maxPerDay: 7 } }), false);
+    expect(p.messages).toEqual({ maxPerDay: 7, maxBodyBytes: 4096, recipients: null });
+    expect(parseStoredPolicy("{}", false).messages).toBeUndefined();
+    expect(() => parseStoredPolicy(JSON.stringify({ messages: { maxPerDay: -3 } }), false)).toThrow();
+  });
+});
+
+describe("evaluateMessageSend", () => {
+  test("absent policy disables messaging", () => {
+    const d = evaluateMessageSend(undefined, false, TO, 10, 0);
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("DISABLED");
+  });
+
+  test("killfile wins over an otherwise valid message", () => {
+    const d = evaluateMessageSend(MSG, true, TO, 10, 0);
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("KILL");
+  });
+
+  test("rejects a non-mainnet recipient", () => {
+    const d = evaluateMessageSend(MSG, false, "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy", 10, 0);
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("BAD_ADDRESS");
+  });
+
+  test("empty recipients allowlist rejects everyone", () => {
+    const d = evaluateMessageSend({ ...MSG, recipients: [] }, false, TO, 10, 0);
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("ALLOWLIST");
+  });
+
+  test("recipient outside the allowlist is rejected", () => {
+    const d = evaluateMessageSend({ ...MSG, recipients: [OTHER] }, false, TO, 10, 0);
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("ALLOWLIST");
+  });
+
+  test("listed recipient is allowed", () => {
+    expect(evaluateMessageSend({ ...MSG, recipients: [TO] }, false, TO, 10, 0).ok).toBe(true);
+  });
+
+  test("body over the byte cap is rejected; at the cap is allowed", () => {
+    const over = evaluateMessageSend({ ...MSG, maxBodyBytes: 10 }, false, TO, 11, 0);
+    expect(over.ok).toBe(false);
+    if (!over.ok) expect(over.code).toBe("CAP");
+    expect(evaluateMessageSend({ ...MSG, maxBodyBytes: 10 }, false, TO, 10, 0).ok).toBe(true);
+  });
+
+  test("daily count cap is reached at maxPerDay", () => {
+    const d = evaluateMessageSend({ ...MSG, maxPerDay: 2 }, false, TO, 10, 2);
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.code).toBe("DAY");
+    expect(evaluateMessageSend({ ...MSG, maxPerDay: 2 }, false, TO, 10, 1).ok).toBe(true);
+  });
+});
+
+describe("messages usage scope", () => {
+  const NOW = new Date("2026-11-17T12:00:00Z");
+  const today = NOW.toISOString();
+  const yesterday = new Date(NOW.getTime() - 86_400_000).toISOString();
+  const txid = "ab".repeat(32);
+  const lines = [
+    JSON.stringify({ kind: "agent-message", t: today, amount: 1, fee: 300, to: TO, txid }),
+    JSON.stringify({ kind: "send", t: today, amount: 5000, fee: 10, to: TO, txid }),
+    JSON.stringify({ kind: "attest", t: today, amount: 0, fee: 200, to: "attest", txid }),
+    JSON.stringify({ kind: "agent-message", t: yesterday, amount: 1, fee: 250, to: TO, txid }),
+  ];
+
+  test("messages scope counts only agent-message rows, fee-inclusive", () => {
+    const u = usageFromLog(lines, NOW, "messages");
+    expect(u.spentToday).toBe(301);
+    expect(u.spentLifetime).toBe(552);
+  });
+
+  test("message rows also feed the plain bsv and brc181-bsv scopes", () => {
+    expect(usageFromLog(lines, NOW, "bsv").spentToday).toBe(5001);
+    expect(usageFromLog(lines, NOW, "brc181-bsv").spentToday).toBe(5511);
+  });
+
+  test("messageCountFromLog counts today's agent-message rows only", () => {
+    expect(messageCountFromLog(lines, NOW)).toBe(1);
+    expect(messageCountFromLog([], NOW)).toBe(0);
+  });
+
+  test("corrupt log lines fail closed for both readers", () => {
+    expect(() => usageFromLog(["{corrupt", ...lines], NOW, "messages")).toThrow();
+    expect(() => messageCountFromLog(["{corrupt"], NOW)).toThrow();
   });
 });
 

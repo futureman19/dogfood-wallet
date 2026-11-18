@@ -67,6 +67,23 @@ export function createServer(root: string) {
   );
 
   server.registerTool(
+    "agent_message",
+    {
+      description:
+        "Send a signed on-chain agent message (type 'message' only) with a 1-sat recipient inbox tip. Requires an explicit policy.messages block; absent = DISABLED. Fail-closed caps: maxPerDay, maxBodyBytes, optional recipients allowlist; killfile freezes sends. Body is public and permanent — never secrets. Ambiguous broadcast outcome = PAYMENT_HELD; no automatic retry.",
+      inputSchema: {
+        to: z.string().describe("Recipient mainnet P2PKH address"),
+        body: z.string().describe("Message body (UTF-8 text, within policy.messages.maxBodyBytes)"),
+      },
+    },
+    async ({ to, body }) => {
+      const { sendAgentMessage } = await import("./agent-message-send");
+      const result = await sendAgentMessage({ root, to, body });
+      return text(result, !result.ok);
+    },
+  );
+
+  server.registerTool(
     "auth_sign",
     {
       description:

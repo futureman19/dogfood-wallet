@@ -31,7 +31,8 @@ test("actual CLI refuses hold even with no readable vault policy/key", async () 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 test("MCP registry has no unguarded payment or hold-clear tool", () => run("held", r => {
-  expect(r.tools.sort()).toEqual(["address", "auth_sign", "auth_verify", "balance", "kill", "osp_doors", "request_allow", "request_cap", "request_osp_grant", "request_send", "requests", "send", "status", "x402_delegate", "x402_inspect", "x402_pay", "x402_proof"]);
+  // agent_message is guarded: policy.messages gate + shared payment guard + killfile.
+  expect(r.tools.sort()).toEqual(["address", "agent_message", "auth_sign", "auth_verify", "balance", "kill", "osp_doors", "request_allow", "request_cap", "request_osp_grant", "request_send", "requests", "send", "status", "x402_delegate", "x402_inspect", "x402_pay", "x402_proof"]);
 }));
 test("pure sponsored timeout releases without local accounting", () => run("sponsored-timeout", r => {
   expect(r.body.ok).toBe(false); expect(r.events).toContain("delegate");

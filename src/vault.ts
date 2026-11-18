@@ -11,6 +11,7 @@ import {
   parseGrydPolicy,
   parsePopnlocksPolicy,
   parseOspPolicy,
+  parseMessagesPolicy,
   parseBtcPolicy,
   parseDogePolicy,
   type BridgePolicy,
@@ -37,6 +38,10 @@ export function vaultPaths(root: string) {
     requests: join(root, "requests"),
     permits: join(root, "permits"),
     ospDoors: join(root, "osp-doors"),
+    /** Outpoints paid to message inboxes; excluded from coin selection. */
+    inboxTips: join(root, "inbox-tips.json"),
+    /** Fsynced per-message intent/evidence records (payment-guard style). */
+    messages: join(root, "messages"),
   };
 }
 
@@ -180,6 +185,7 @@ export function parseStoredPolicy(raw: string, killfileOn: boolean): Policy {
     gryd: parseGrydPolicy(parsed.gryd),
     popnlocks: parsePopnlocksPolicy(parsed.popnlocks),
     osp: parseOspPolicy(parsed.osp),
+    messages: parseMessagesPolicy(parsed.messages),
     btc: parseBtcPolicy(parsed.btc),
     doge: parseDogePolicy(parsed.doge),
   };

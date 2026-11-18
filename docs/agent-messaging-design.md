@@ -627,10 +627,16 @@ authorization. Disposable vaults + intercepted network for all tests.
   envelopes both ways). Read-only indexing check completed: **negative** —
   see §3.5.3; Option A is the active transport, Option B deferred.
   No broadcast, no vault access, no CLI/MCP surface added.
-- **S2 — Guarded send.** `policy.messages` schema + evaluation, usage scope,
-  BRC-181 hook, shared guard/intent/evidence/HOLD, coin-selection exclusion of
-  inbox tips, CLI `agent-message`, MCP `agent_message`. Policy-spelling and
-  MCP-boundary tests.
+- **S2 — Guarded send. ✅ DONE 2026-11-17.** `policy.messages` schema +
+  evaluation (absent = DISABLED; strict mainnet P2PKH recipients — P2SH
+  rejected; maxPerDay / maxBodyBytes / recipients allowlist), fee-inclusive
+  `messages` usage scope (also feeds bsv / brc181-bsv), BRC-181 pre/post gate,
+  shared guard/intent/fsynced-evidence/HOLD (`agent-message` operation),
+  inbox-tip outpoint exclusion store (`src/inbox-tips.ts`, fail-closed),
+  CLI `agent-message` (+`--json`), MCP `agent_message` (registry pins updated).
+  51 new tests; full verify 1319/0. Intercepted transport only — zero
+  broadcasts, no funding. Fee model covers real tx size (OP_RETURN
+  CompactSize length included); dust change folds like send.ts.
 - **S3 — Inbox.** WoC scan, Locus/BitCom filter, parse, verify, agent-pin
   binding resolution, dedupe, high-water mark; CLI `messages`, MCP
   `messages` / `message_verify`. Assert disjointness from OSP door scanners

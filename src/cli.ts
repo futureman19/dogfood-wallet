@@ -47,6 +47,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts agent-register <mint-txid> <name> <lat> <lng> [--no-post]
   bun src/cli.ts agent-list <ordinal-outpoint> <price-sats> [--no-broadcast]
   bun src/cli.ts agent-cancel-listing <listing-outpoint> [--no-broadcast]
+  bun src/cli.ts agent-message <to-address> <body> [--type T] [--json]  # guarded 1-sat inbox message
   bun src/cli.ts fund-request <sats>
   bun src/cli.ts osp address                                # this vault's OSP door-owner identity
   bun src/cli.ts osp list                                   # doors, status, tracked tips
@@ -97,6 +98,7 @@ agent-mint and agent-register are human-only: broadcast / metadata POST by defau
 agent-call is human-only: prints an offline signed Gryd envelope; never sends it.
 agent-buy is human-only: purchases on chain by default; --no-broadcast is an unsigned preview.
 agent-list and agent-cancel-listing are human-only: broadcast by default; unsigned --no-broadcast preview.
+agent-message is policy-gated: requires policy.messages (absent = disabled); killfile wins; no automatic retry.
 Phase 3 backend compatibility is pending; do not use live until the Gryd verifier is updated.
 allow, sweep, split, fund-request, allowance-*, policy-inspect, and policy-issue are human-only (not MCP tools).
 osp init/grant/revoke are human-only: sign + broadcast OSP door transitions; --request files an agent ask instead.
@@ -549,6 +551,35 @@ async function main() {
       if (!result.ok) die(result.message);
       console.log(`txid: ${result.txid}`);
       console.log(`split: ${result.pieces?.length ?? 0} outputs (fee ${result.fee})`);
+      break;
+    }
+    case "agent-message": {
+      if (!a || !b) die("Usage: agent-message <to-address> <body> [--type T] [--json]");
+      let json = false;
+      let type: string | undefined;
+      for (let i = 0; i < rest.length; i++) {
+        const token = rest[i]!;
+        if (token === "--json") json = true;
+        else if (token === "--type") {
+          const value = rest[++i];
+          if (value === undefined) die("REJECTED: --type requires a value.");
+          type = value;
+        } else die(`REJECTED: Unknown agent-message option '${token}'. Only --type and --json are supported.`);
+      }
+      const { sendAgentMessage } = await import("./agent-message-send");
+      const result = await sendAgentMessage({ root, to: a, body: b, type });
+      if (!result.ok) {
+        if (json) {
+          console.log(JSON.stringify(result, null, 2));
+          process.exit(1);
+        }
+        die(result.message);
+      }
+      if (json) console.log(JSON.stringify(result, null, 2));
+      else {
+        console.log(`txid: ${result.txid}`);
+        console.log(`message: 1 sat tip to ${result.to} (fee ${result.fee}, nonce ${result.nonce})`);
+      }
       break;
     }
     case "x402-inspect": {

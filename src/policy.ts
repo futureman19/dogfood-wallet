@@ -1,5 +1,6 @@
 import {canonicalBtcDest} from './btc-address';
 import {canonicalDogeDest} from './doge-address';
+import {Utils} from '@bsv/sdk';
 export const DEFAULT_MAX_SATS = 10_000;
 export const DEFAULT_MAX_SATS_PER_DAY = 50_000;
 
@@ -50,6 +51,100 @@ export function parseOspPolicy(raw: unknown): OspPolicy | undefined {
   return { maxSatsPerTx: p.maxSatsPerTx, maxSatsPerDay: p.maxSatsPerDay };
 }
 
+// Agent messaging (S2): absent block = rail DISABLED (fail-closed).
+// maxPerDay is a message COUNT cap per UTC day; maxBodyBytes caps the
+// plaintext body; recipients is an optional destination allowlist
+// (null = unrestricted, [] = deny all). Sats leaving the vault (1-sat tip +
+// miner fee) account fee-inclusive against the dedicated "messages" usage
+// scope and also feed the bsv / brc181-bsv scopes like any other BSV spend.
+export type MessagesPolicy = {
+  maxPerDay: number;
+  maxBodyBytes: number;
+  recipients: string[] | null;
+};
+
+/** Strict mainnet P2PKH (version byte 0x00, 20-byte hash). The legacy
+ *  isValidAddress regex also accepts P2SH ("3…"); message recipients and
+ *  allowlist entries must be plain mainnet P2PKH, same rule as the S1 codec. */
+function isMainnetP2pkh(address: unknown): address is string {
+  if (typeof address !== "string") return false;
+  try {
+    const d = Utils.fromBase58Check(address);
+    const prefix = d.prefix as number[];
+    const data = d.data as number[];
+    return prefix.length === 1 && prefix[0] === 0x00 && data.length === 20;
+  } catch {
+    return false;
+  }
+}
+
+export function parseMessagesPolicy(raw: unknown): MessagesPolicy | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid messages policy block");
+  const p = raw as Record<string, unknown>;
+  const maxPerDay = p.maxPerDay === undefined ? 100 : p.maxPerDay;
+  const maxBodyBytes = p.maxBodyBytes === undefined ? 4096 : p.maxBodyBytes;
+  const recipients = p.recipients === undefined ? null : p.recipients;
+  if (typeof maxPerDay !== "number" || !Number.isSafeInteger(maxPerDay) || maxPerDay < 1)
+    throw new Error("Invalid messages.maxPerDay: positive safe integer required");
+  if (typeof maxBodyBytes !== "number" || !Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 1)
+    throw new Error("Invalid messages.maxBodyBytes: positive safe integer required");
+  if (recipients !== null) {
+    if (!Array.isArray(recipients)) throw new Error("Invalid messages.recipients: array of addresses or null required");
+    for (const a of recipients) {
+      if (!isMainnetP2pkh(a)) throw new Error("Invalid messages.recipients entry: mainnet P2PKH address required");
+    }
+  }
+  return { maxPerDay, maxBodyBytes, recipients: recipients as string[] | null };
+}
+
+export function evaluateMessageSend(
+  messages: MessagesPolicy | undefined,
+  killfileOn: boolean,
+  to: string,
+  bodyBytes: number,
+  countToday: number,
+): Decision {
+  if (!messages) return { ok: false, code: "DISABLED", message: "REJECTED: agent messaging is disabled — no messages policy configured. Add a messages block to policy.json to enable it." };
+  if (killfileOn) return { ok: false, code: "KILL", message: "REJECTED: Killfile STOP_SPENDING is on. Human must delete it to resume." };
+  if (!isMainnetP2pkh(to)) return { ok: false, code: "BAD_ADDRESS", message: "REJECTED: Recipient is not a mainnet P2PKH address." };
+  if (messages.recipients !== null && !messages.recipients.includes(to)) {
+    return {
+      ok: false,
+      code: "ALLOWLIST",
+      message: messages.recipients.length === 0
+        ? "REJECTED: messages.recipients is empty. A human must allow a recipient first."
+        : "REJECTED: Recipient is not on the messages.recipients allowlist.",
+    };
+  }
+  if (!Number.isSafeInteger(bodyBytes) || bodyBytes < 0 || bodyBytes > messages.maxBodyBytes)
+    return { ok: false, code: "CAP", message: `REJECTED: Body exceeds messages.maxBodyBytes (${messages.maxBodyBytes} bytes).` };
+  if (countToday >= messages.maxPerDay)
+    return { ok: false, code: "DAY", message: `REJECTED: Exceeds messages.maxPerDay (${messages.maxPerDay} messages/day, ${countToday} already sent today).` };
+  return { ok: true };
+}
+
+/** Today's agent-message count for the messages.maxPerDay gate. Unlike the
+ *  legacy lenient usage reader this FAILS CLOSED: a corrupt spend-log line
+ *  throws instead of silently under-counting toward the cap. */
+export function messageCountFromLog(lines: string[], now: Date = new Date()): number {
+  const today = utcDay(now);
+  let count = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let row: { kind?: unknown; t?: unknown };
+    try {
+      row = JSON.parse(trimmed);
+    } catch {
+      throw new Error("REJECTED: corrupt spend-log line; message count cannot be verified.");
+    }
+    if (row.kind !== "agent-message") continue;
+    if (typeof row.t === "string" && row.t.slice(0, 10) === today) count++;
+  }
+  return count;
+}
+
 /** totalSats = everything leaving the vault in this transition (payment + fee). */
 export function evaluateOspTransition(
   osp: OspPolicy | undefined,
@@ -74,6 +169,8 @@ export type Policy = {
   doge?: DogePolicy;
   gryd?: GrydPolicy;
   osp?: OspPolicy;
+  /** Agent messaging rail. Absent = DISABLED (fail-closed). */
+  messages?: MessagesPolicy;
   maxSatsPerTx: number;
   maxSatsPerDay: number | null;
   maxSatsLifetime: number | null;
@@ -459,16 +556,21 @@ export function usageFromLog(lines: string[], now: Date = new Date(), asset = "b
         if (row.kind !== "agent-buy") continue;
       } else if (asset === "osp") {
         if (row.kind !== "osp-grant" && row.kind !== "osp-door-init" && row.kind !== "osp-revoke") continue;
+      } else if (asset === "messages") {
+        if (row.kind !== "agent-message") continue;
       } else if (!(BRC181_SCOPES[asset] ?? [asset]).includes(rowAsset)) continue;
       let amount =
         typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
-      if ((asset === "brc181-bsv" || asset === "brc181-btc" || asset === "brc181-doge" || asset === "osp") && typeof row.fee === "number" && Number.isSafeInteger(row.fee) && row.fee > 0) amount += row.fee;
+      if ((asset === "brc181-bsv" || asset === "brc181-btc" || asset === "brc181-doge" || asset === "osp" || asset === "messages") && typeof row.fee === "number" && Number.isSafeInteger(row.fee) && row.fee > 0) amount += row.fee;
       spentLifetime += amount;
       if (typeof row.t === "string") {
         const day = asset === "gryd" ? (Number.isFinite(Date.parse(row.t)) ? utcDay(new Date(row.t)) : "") : row.t.slice(0, 10);
         if (day === today) spentToday += amount;
       }
     } catch {
+      // The new messages scope fails closed on corrupt lines; legacy scopes
+      // keep their historical lenient behavior.
+      if (asset === "messages") throw new Error("REJECTED: corrupt spend-log line; messages usage cannot be verified.");
       continue;
     }
   }
