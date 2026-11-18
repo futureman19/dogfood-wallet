@@ -68,6 +68,7 @@
     "docs/package-install.md",
     "src/agent-message.ts",
     "src/agent-message-send.ts",
+    "src/agent-message-inbox.ts",
     "src/inbox-tips.ts",
     "src/allowance.ts",
     "src/auth-sign.ts",

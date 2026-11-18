@@ -1,7 +1,8 @@
 # Agent-to-Agent Messaging — v2 Design (Locus-native)
 
-**Status: DESIGN ONLY — not implemented.** No code, policy schema, or MCP
-surface described here exists yet. This revises v1 (`964bd54`) after
+**Status: S1–S3 IMPLEMENTED (2026-11-17); S4–S5 pending.** Implementation
+progress is tracked per slice in §12; funded steps still require explicit
+authorization. This revises v1 (`964bd54`) after
 grounding in the actual Locus Protocol spec and reference implementation
 (provenance: §14). v1 carried messages as a standalone Dogfood BitCom
 format; v2 makes messaging **Locus-native** (riding the existing `mint`
@@ -637,10 +638,24 @@ authorization. Disposable vaults + intercepted network for all tests.
   51 new tests; full verify 1319/0. Intercepted transport only — zero
   broadcasts, no funding. Fee model covers real tx size (OP_RETURN
   CompactSize length included); dust change folds like send.ts.
-- **S3 — Inbox.** WoC scan, Locus/BitCom filter, parse, verify, agent-pin
-  binding resolution, dedupe, high-water mark; CLI `messages`, MCP
-  `messages` / `message_verify`. Assert disjointness from OSP door scanners
-  both ways.
+- **S3 — Inbox. ✅ DONE 2026-11-17.** `src/agent-message-inbox.ts`: keyless,
+  read-only WoC scan (`confirmed/history` asc from high-water+1, plus
+  `unconfirmed/history`, ≥350 ms pacing under the 3 req/s limit), strict
+  Option A/B classification, 1-sat P2PKH tip-payee inbox filter (sent
+  messages never pollute the sender's inbox), agent-pin binding (pin owner
+  pubkey must equal the verified authorship key; unverified messages never
+  bind), fail-closed `inbox.json` store (dedupe by txid + confirmed-height
+  high-water mark that never advances past an unprocessed tx; mempool→
+  confirmed upgrades without re-fetch; 500-entry cache cap). Bad signatures
+  surface `verified:false` — never silently dropped, never trusted. Every
+  entry/body carries `untrusted:true` (prompt-injection boundary).
+  Scanner-level disjointness from OSP door envelopes asserted both ways.
+  CLI `messages` (`--address/--from/--type/--limit/--json`), MCP `messages`
+  / `message_verify` (registry pins updated incl. `scripts/verify-package.ts`).
+  48 new tests; full verify 1367/0; `verify:package` green. Zero broadcasts,
+  no funding, no vault decryption. Live-verified read-only: full history
+  scan of the vault address (high-water 975782) and a zero-refetch
+  incremental rescan; WoC's 404-on-empty-page quirk handled fail-safe.
 - **S4 — OSP typed messages.** `osp.grant.request` / `osp.grant.receipt`
   bodies, validation parity with `requests.ts`, cross-agent flow tests
   (message → file → approve → grant → receipt → on-chain verify) with

@@ -42,6 +42,8 @@ export function vaultPaths(root: string) {
     inboxTips: join(root, "inbox-tips.json"),
     /** Fsynced per-message intent/evidence records (payment-guard style). */
     messages: join(root, "messages"),
+    /** S3 read-only inbox cache: high-water mark, dedupe set, entries. */
+    inbox: join(root, "inbox.json"),
   };
 }
 
