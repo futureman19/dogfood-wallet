@@ -1,28 +1,54 @@
-# Agent-to-Agent Messaging — v1 Design
+# Agent-to-Agent Messaging — v2 Design (Locus-native)
 
 **Status: DESIGN ONLY — not implemented.** No code, policy schema, or MCP
-surface described here exists yet. This document is the scoping artifact for
-the feature; implementation follows the slices in §11 under the repo's TDD and
-verification gates.
+surface described here exists yet. This revises v1 (`964bd54`) after
+grounding in the actual Locus Protocol spec and reference implementation
+(provenance: §14). v1 carried messages as a standalone Dogfood BitCom
+format; v2 makes messaging **Locus-native** (riding the existing `mint`
+op) and adds a **platform-owned agent identity convention**. The OSP
+alignment, safety model, and slice discipline from v1 are retained
+verbatim where unchanged. Implementation follows §12 under the repo's
+TDD and verification gates; this doc authorizes no code, no broadcast,
+and no shared-protocol modification.
 
 ## 1. Purpose
 
-Let one Dogfood vault (an agent) send a message to another vault (another
-agent) that is **stored permanently on the BSV blockchain**, with
-cryptographic proof of which vault key sent it.
+Let one agent deliver a short, signed, durable message to another
+agent's vault address, recorded permanently on BSV and **discoverable by
+any Locus indexer** — not just Gryd. The recipient reads an inbox with
+zero shared infrastructure. Messages are public coordination artifacts:
+offers, requests, receipts, attestations-between-agents.
 
 Dogfood today lets agents *pay* (send, x402, bridge, OSP paid grants) and
-*attest* (owner-only signed observations). It does not let agents *talk to
-each other*. Messaging adds the coordination layer: agents can negotiate
+*attest* (owner-only signed observations). It does not let agents *talk
+to each other*. Messaging adds the coordination layer: agents negotiate
 terms, request access, and hand off tasks on-chain, then settle with the
 payment rails that already exist.
 
-Product fit: GrydWorld is a world for agents; Dogfood is its payment layer.
-An agent that can message another agent can also compose
-`message → negotiation → OSP paid grant / x402 / send` into cross-agent
-commerce without any hosted intermediary.
+**Corrected stack framing.** Locus is the *platform protocol* — an open,
+wallet-agnostic convention for location-anchored ownable objects
+("pins") on BSV. Its spec states plainly that *"Gryd.world is the
+reference visual indexer… it holds no privileged position"* and anyone
+can construct, broadcast, and index pins with any BSV tooling, without
+accounts or permission. So:
 
-## 2. Alignment with recent OSP work
+- **Locus** — the platform contract (pins, canonical JSON payload,
+  ownership-as-UTXO, the signed-write action vocabulary). Any BRC-100
+  wallet works.
+- **Gryd** — one indexer/app on Locus (the visual world + backend).
+- **Dogfood** — a wallet/safety rail that signs and settles; one BRC-100
+  implementation among many.
+- **OSP** — a paid-access protocol that plugs into the platform.
+- **Messaging (this doc)** — a coordination protocol that plugs into the
+  platform, riding Locus's own pin mechanism.
+
+Two buses make the separation efficient: **BSV** (settlement +
+permanence) and **Locus** (world/object/identity contract). Domain
+protocols compose through them without routing through any single app.
+An agent can compose `message → negotiation → OSP paid grant / x402 /
+send` into cross-agent commerce with no hosted intermediary.
+
+## 2. Alignment with recent OSP work (unchanged from v1)
 
 The Open and Shut Protocol door-ownership slice (commits `16af988`,
 `c5ff067`, `8963a00`) is the natural counterpart to this feature:
@@ -50,41 +76,255 @@ fail-closed when the policy block is absent, killfile wins, fee-inclusive
 caps, shared payment guard, fsynced intent/evidence before broadcast,
 single-attempt ARC, ambiguous acknowledgement = HOLD (never auto-retry).
 
-## 3. Existing primitives reused
+## 3. Locus platform integration (the v2 core)
+
+### 3.1 Why ride Locus `mint` instead of inventing a new op
+
+A Locus mint transaction is an ordinary BSV transaction with:
+
+- a **tip output**: exactly 1 satoshi (recommended; any positive amount
+  valid) via plain P2PKH to the **owner address**; the pin's persistent id
+  is that outpoint `<txid>.<vout>` (spec §3.1);
+- a **payload output**: zero-sat `OP_FALSE OP_RETURN` carrying canonical
+  JSON `{p:"locus", v:3, op:"mint", …}` (spec §4, §7.2);
+- optional other outputs + change.
+
+Two spec rules make this a *native* fit for messaging, not a stretch:
+
+1. **Attribution is permissionless** (§10.2): *"Anyone can pay 1 sat to
+   your address with a payload naming you owner — you then hold (and
+   control) the pin… Clients SHOULD filter spam views, not censor the
+   index."* This is precisely the agent-message inbox: the **sender funds
+   and signs** a mint that names the **recipient as owner**. The reference
+   builder supports this directly — `resolveOwnerAddress` takes an explicit
+   `ownerAddress` independent of the signing key
+   (`transaction-builder.ts:507`).
+2. **Ownership is the tip UTXO** (§10.1): the indexer sets `owner` from the
+   payload, then confirms a positive-value output pays that address. The
+   recipient's set of owned message-pins **is** their inbox, and any Locus
+   indexer already reads it.
+
+So a message is a **mint of an ownable object** with `type:"object"` and a
+message `subtype` (subtype is convention, not consensus — §6.7/§9).
+**No new Locus op is required and no shared protocol is modified.** This
+preserves the wallet's standing doctrine (attestations, OSP, signed-write
+all *use* Locus without changing it). A bespoke `op:agent.message` would
+require a SPEC.md proposal + JSON schema + indexer governance; riding
+`mint` + `content` + subtype convention avoids that entirely.
+
+### 3.2 The inbox convergence
+
+v1's "1-sat notification output so the message appears in the recipient's
+address history" is **structurally identical to the Locus tip rule**. v2
+stops treating it as a trick and treats it as the platform primitive: the
+1-sat tip to the recipient *is* a Locus pin owned by the recipient.
+Discovery is the standard Locus indexer recipe (spec §5,
+`parse.ts:findLocusPayload`) — no Dogfood-specific scanner is needed for
+platform-native views.
+
+### 3.3 Sender authentication — the one real gap
+
+Locus native attribution proves **who owns** a pin (the recipient), not
+**who authored** it. The payload's `owner_pubkey` is the recipient's; a
+mint carries no sender signature, and anyone can attribute a pin to anyone
+(§10.2 is permissionless *by design*). Authorship must therefore be carried
+explicitly:
+
+- The message body is a **canonical signed envelope** (§5.2) embedded in
+  the mint payload's `content` field (`content_type:"application/json"`).
+- The envelope carries `from` (sender vault P2PKH address) and a **sender
+  signature** over the canonical envelope bytes excluding the signature
+  field, produced by the sender's root vault key.
+- A reader verifies the embedded signature against `from`'s pubkey
+  independently of the Locus layer. **Locus proves delivery + ownership +
+  discovery; the embedded signature proves authorship.** Neither alone is
+  sufficient.
+
+Option A (§3.6) instead uses a strict chained BitCom AIP push for ecosystem
+AIP verifiers; the signed-envelope core is shared between both options.
+
+### 3.4 Platform-owned agent identity convention
+
+The seam v1 named — one agent with four related-but-ununified identities
+(Gryd agent id, vault address, OSP door-owner key, message sender) — is
+resolved by making the **Locus agent pin the canonical identity**:
+
+- An agent is a Locus pin with `type:"agent"`, created by `op:mint`,
+  carrying `owner` + `owner_pubkey` (compressed SEC hex, 33 bytes — §6.4).
+  Its pin id `<txid>.<vout>` is the platform-stable agent id.
+- The Dogfood **vault address** is the P2PKH derived from that
+  `owner_pubkey` (`publicKeyToAddress`). The **message sender** (`from`)
+  and the **OSP door-owner key** resolve back to the same agent pin.
+- Message envelopes carry, for both parties, the vault address **and an
+  optional `agentPin` ref** (`<txid>.<vout>`). A verifier resolves the pin's
+  `owner_pubkey` → address and checks it matches the embedded signature's
+  recovered key. A message whose `from` does not resolve to the claimed
+  agent pin is surfaced as **unbound**, never silently trusted.
+- The Gryd in-world agent id maps to the same pin via the existing
+  deposit/registration binding (vault address ↔ in-world agent). This doc
+  proposes the convention; it does not modify Gryd or Locus.
+
+This is the highest-leverage integration: it turns "many protocols sharing
+a chain" into "one agent across the platform," at no new protocol surface —
+agent pins already exist in Locus.
+
+### 3.5 New consequences the wallet must handle (honest costs)
+
+Going Locus-native is not free:
+
+1. **Message tips are owned pins, not disposable dust.** Spending the 1-sat
+   tip *transfers* the pin (§3.1, §10.5). The vault's smallest-first coin
+   selection must **exclude inbox message-tip UTXOs** from funding (or
+   deliberately accept transfer semantics). v1's BitCom notification was
+   freely spendable dust; v2's tip is an owned artifact. New selection rule,
+   new test surface.
+2. **Content/metadata is untrusted** (§6.7): attacker-controlled text. Never
+   execute it, never render it as HTML, never feed it to an LLM without
+   marking it untrusted. The inbox surfaces unknown subtypes as
+   uninterpreted data. Reinforces v1's "never auto-execute."
+3. **Coordinate-less mint divergence.** The reference builder permits `mint`
+   without `lat`/`lng` (`buildMintPayload` asserts coords only when
+   provided), but spec §7.2 prose says mint is "identical to place" (which
+   requires coords). A message has no natural GPS anchor. **Verify against
+   `schemas/` + `pin_chain_verifier.ex` before implementation** whether
+   coordinate-less object mints index cleanly; if not, anchor at the
+   recipient agent pin's location or fall back to Option A. Do not assume.
+4. **Insert-only by txid** (§10.4): replays are ignored by indexers. Aligns
+   with the wallet's reserve-before-broadcast replay store; reuse it.
+5. **Subtype rendering is convention.** Indexers index the mint; special
+   in-world rendering of `agent-message` is a renderer concern, not
+   guaranteed. Discovery works regardless; pretty display is follow-up.
+
+### 3.6 Format decision — two honest options
+
+- **Option A — BitCom peer protocol.** Keep v1's chained `B | MAP | AIP`
+  OP_RETURN (`app=dogfood`, `type=agent-message`, §5.3). Strict AIP gives
+  ecosystem-verifiable sender auth; discovery via BitCom/MAP indexers
+  (JungleBus). Locus-aware only through identity refs (§3.4). A legitimate
+  *peer* application protocol on BSV — Locus itself is just one such
+  protocol. No Locus transport, no owned-pin inbox, no coin-selection
+  change.
+- **Option B — Locus-native (recommended).** `op:mint`, `type:"object"`,
+  `subtype:"agent-message"`, recipient as owner, 1-sat tip = inbox pin,
+  signed envelope embedded in `content` (§5.1–5.2). Native Locus indexer
+  discovery + platform identity + pin inbox; sender auth via the embedded
+  signature. Inherits the §3.5 costs.
+
+**Recommendation:** ship **Option B** for platform-native discovery and
+identity, retaining the **signed-envelope core** so Option A remains an
+interop/fallback path (e.g. for coordinate-less-mint indexing gaps,
+§3.5.3). Recorded as a decision in §13 — a design choice, not a unilateral
+protocol change. If native indexer discovery proves low-value in practice,
+Option A is the cheaper steady state.
+
+## 4. Existing primitives reused
 
 | Primitive | Location | Reuse |
 |---|---|---|
-| Canonical JSON (JCS subset: sorted keys, no floats, safe integers, lowercase hex) | `src/osp-scope.ts` | Envelope canonicalization — same discipline as OSP-0002 scope blobs |
-| BSM signing / keyless verification | `src/auth-sign.ts` | AIP `BITCOIN_ECDSA` signatures; verification needs no vault key |
+| Locus mint builder / payload parser | `@locus/protocol` `transaction-builder.ts` (`buildMintTx`, `buildMintPayload`), `parse.ts` (`findLocusPayload`) | Option B transport + discovery; reuse rather than reimplement the pin format |
+| Canonical JSON (JCS subset: sorted keys, no floats, safe integers, lowercase hex) | `src/osp-scope.ts` | Envelope canonicalization — same discipline as OSP-0002 scope blobs and Locus §4 |
+| BSM signing / keyless verification | `src/auth-sign.ts` | Embedded envelope signature (Option B) and AIP `BITCOIN_ECDSA` (Option A); verification needs no vault key |
 | Shared payment guard, persisted intent, fsynced evidence, single-attempt broadcast, HOLD | `src/payment-guard.ts`, `src/send.ts`, `src/utxo-treasury.ts` | The message broadcast is a guarded spend like any other |
 | Policy engine + usage accounting | `src/policy.ts`, `src/vault.ts` | New `messages` block and `messages` usage scope |
-| BRC-181 envelope gates | `src/brc181.ts` | If installed, gates the notification destination + total |
-| Escalation queue (`osp-grant` ask kind) | `src/requests.ts` | Receiving agent files cross-agent grant requests through the existing validation |
+| BRC-181 envelope gates | `src/brc181.ts` | If installed, gates the tip destination + total |
+| Escalation queue (`osp-grant` ask kind) | `src/requests.ts` | Receiving agent files cross-agent grant requests through existing validation |
 | WoC read helpers (paced, read-only) | `src/send.ts`, `src/osp.ts` | Inbox scan and receipt verification |
 | OSP codecs + golden vectors | `src/osp-envelope.ts`, `testdata/osp-vectors.json` | Byte-pinning pattern for the message codec's own vectors |
 
-No new runtime dependency is required: BitCom pushes are plain script
-pushdata constructible with the existing `@bsv/sdk`. (`@1sat/templates` is
-an optional convenience, not a requirement; adding it would need the
-dependency-declaration gate in `scripts/package.test.ts`.)
+No new runtime dependency is strictly required: Locus payloads and BitCom
+pushes are plain script pushdata constructible with the existing
+`@bsv/sdk`. Reusing `@locus/protocol` (Option B) is preferred to keep the
+pin format byte-exact; adding it as a dependency would need the
+dependency-declaration gate in `scripts/package.test.ts`. `@1sat/templates`
+is an optional convenience, not a requirement.
 
-## 4. On-chain format
+## 5. On-chain format
 
-### 4.1 OP_RETURN layout (BitCom B | MAP | AIP)
+### 5.1 Locus mint payload (Option B transport)
 
-One OP_RETURN output, chained per the BitCom convention so ecosystem
-indexers (JungleBus, 1Sat tooling) can parse and verify it natively:
+Canonical JSON (sorted keys recursively, no whitespace, UTF-8 — Locus §4,
+matching the OSP-0002 JCS subset in `src/osp-scope.ts`), in a zero-sat
+`OP_FALSE OP_RETURN`:
+
+```json
+{
+  "p": "locus",
+  "v": 3,
+  "op": "mint",
+  "type": "object",
+  "subtype": "agent-message",
+  "owner": "<recipient vault P2PKH address>",
+  "owner_pubkey": "<recipient compressed pubkey, lowercase hex>",
+  "content_type": "application/json",
+  "content": "<canonical signed message envelope, §5.2>",
+  "nonce": 1234567890,
+  "ts": 1763000000
+}
+```
+
+- `nonce` here is the Locus uint32 geo-nonce convention; the *envelope*
+  nonce (§5.2) is a separate 32-hex dedupe aid.
+- `lat`/`lng`/`geohash` omitted (coordinate-less; §3.5.3 verification
+  pending) or set to the recipient agent pin's anchor.
+- `metadata` MAY carry optional `agentPin` refs; it is untrusted (§6.7).
+- `owner`/`owner_pubkey` are the **recipient** (permissionless attribution,
+  §3.1); the sender is authenticated only by the embedded envelope (§3.3).
+
+### 5.2 The signed message envelope (authorship core, shared by A and B)
+
+Embedded in `content` (Option B) or in the `B` push (Option A). Canonical
+JSON; the signature covers the envelope **excluding** `sig`:
+
+```json
+{
+  "app": "dogfood",
+  "v": 1,
+  "type": "<message type, §7>",
+  "from": "<sender vault P2PKH address>",
+  "to": "<recipient vault P2PKH address>",
+  "fromAgentPin": "<txid>.<vout> (optional)",
+  "toAgentPin": "<txid>.<vout> (optional)",
+  "nonce": "<16 random bytes, 32 lowercase hex chars>",
+  "ts": 1763000000,
+  "body": { "...type-specific fields, §7..." },
+  "sig": "<sender signature over canonical envelope-minus-sig>"
+}
+```
+
+- Canonicalized with the OSP-0002 JCS subset in `osp-scope.ts`: sorted
+  keys, no floats, safe integers, lowercase hex, UTF-8, no insignificant
+  whitespace. Parse → re-canonicalize → verify must round-trip; reject on
+  any drift. Unknown envelope fields are **rejected**, not ignored.
+- `from` is the sender's root vault address — the same address used for
+  payment and reply (§5.4). `from` must equal the signature's recovered
+  address; `to` must equal the Locus `owner` (Option B) / MAP `to` + tip
+  payee (Option A). Any mismatch = invalid.
+- `sig`: compact BSM (Bitcoin Signed Message) or DER ECDSA over the
+  canonical envelope bytes excluding `sig`, domain-separated by the
+  `app`/`v`/`type`/`from`/`to`/`nonce` fields *inside* the signed bytes. A
+  signature over this envelope cannot be replayed as another protocol's
+  artifact or a different message (recipient, type, nonce committed).
+- `ts`: Unix seconds, safe integer, informational only — verifiers must not
+  trust it for freshness (chain ordering comes from the tx).
+- `nonce`: dedupe/replay-tracking aid, unique per message, not a secret.
+- Addresses are canonical mainnet P2PKH only (same restriction philosophy
+  as the OSP-0005 wallet payment subset). Testnet out of scope for v1.
+
+### 5.3 Option A — BitCom B | MAP | AIP layout (interop/fallback)
+
+One OP_RETURN, chained per BitCom so ecosystem indexers (JungleBus, 1Sat
+tooling) parse and verify natively:
 
 ```
 OP_RETURN
   | B_PREFIX                              (19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut)
-  | <envelope>                            (UTF-8 canonical JSON, §4.2, single push)
+  | <envelope>                            (UTF-8 canonical JSON, §5.2, single push)
   | "application/json"
   | "utf-8"
   | MAP_PREFIX                            (1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5)
   | "SET"
   | "app"  | "dogfood"
-  | "type" | <message type>               (§6)
+  | "type" | <message type>               (§7)
   | "to"   | <recipient vault address>
   | AIP_PREFIX                            (15PciHG22SNLQJXMoSUaWVi7WSqc7hCfva)
   | "BITCOIN_ECDSA"
@@ -92,120 +332,97 @@ OP_RETURN
   | <base64 signature>
 ```
 
-- **AIP signing semantics are strict AIP**: the signature is computed per the
-  AIP spec over the preceding OP_RETURN pushdata, so third-party AIP
-  verifiers (JungleBus/bmap-family) validate it without Dogfood-specific
-  knowledge. Exact byte rules are pinned to golden vectors at implementation
-  time (slice S1), sourced from the AIP spec and observed indexer behavior.
-- **Domain separation** comes from the signed content itself: `app`, `v`,
-  `type`, `from`, `to`, `ts`, `nonce`, `body` are all inside the signed
-  bytes. A signature over a Dogfood message envelope cannot be replayed as
-  another protocol's artifact or as a different message (recipient, type,
-  and nonce are committed). This differs deliberately from attestation's
-  explicit `"Dogfood Attestation v1\n"` prefix: attestations are inscriptions
-  with no ecosystem verifier, while messages choose ecosystem verifiability.
-  The trade-off is recorded here so it is a decision, not an accident.
-- `field_indexes` is omitted (default: all preceding data pushes).
+- **Strict AIP**: signature computed per the AIP spec over the preceding
+  OP_RETURN pushdata, so third-party AIP verifiers validate it without
+  Dogfood-specific knowledge. Exact byte rules pinned to golden vectors at
+  S1, sourced from the AIP spec and observed indexer behavior.
+  `field_indexes` omitted (default: all preceding data pushes).
+- In Option A the envelope `sig` field may be omitted in favor of the
+  chained AIP signature (the AIP push is the authorship proof); the
+  canonical envelope-minus-sig bytes are what AIP signs.
 - **SIGMA upgrade path (not v1):** SIGMA binds the signature to a spent
-  input (`sha256(prevTxId + prevVout)`), preventing any cross-transaction
-  replay of the signed bytes. AIP alone does not bind to inputs. v1 accepts
-  this because the envelope commits `to`/`type`/`nonce` and the notification
-  output makes each message a distinct spend; SIGMA is a v2 hardening option.
+  input (`sha256(prevTxId + prevVout)`), preventing cross-transaction replay
+  of the signed bytes. AIP alone does not bind to inputs. v1 accepts this
+  because the envelope commits `to`/`type`/`nonce` and the tip output makes
+  each message a distinct spend; SIGMA is a later hardening option.
 
-### 4.2 Message envelope (canonical JSON)
+### 5.4 Signing key
 
-```json
-{
-  "app": "dogfood",
-  "body": "…",
-  "from": "<sender vault address, base58 P2PKH>",
-  "nonce": "<16 random bytes, 32 lowercase hex chars>",
-  "to": "<recipient vault address, base58 P2PKH>",
-  "ts": 1763000000,
-  "type": "message",
-  "v": 1
-}
-```
+**v1/v2 sign with the root vault key; `from` is the vault's main address.**
 
-- Canonicalized with the OSP-0002 JCS subset already in `osp-scope.ts`:
-  sorted keys, no floats, safe integers only, lowercase hex, UTF-8, no
-  insignificant whitespace. The canonical bytes are what AIP signs and what
-  the B push carries — parse → re-canonicalize → verify must round-trip.
-- `ts`: Unix seconds, safe integer. Informational only (chain ordering comes
-  from the tx itself); verifiers must not trust it for freshness decisions.
-- `nonce`: dedupe/replay-tracking aid, unique per message; not a secret.
-- `from` must equal the AIP signer address; `to` must equal the MAP `to`
-  value and the notification output's payee (§5). Any mismatch = invalid.
-- `body`: for `type=message`, a UTF-8 string ≤ `maxBodyBytes`. For typed
-  messages (§6), a structured JSON object with the exact fields defined
-  there. Unknown fields are rejected at parse (fail-closed), not ignored.
-- Addresses are canonical mainnet P2PKH only (same restriction philosophy as
-  the OSP-0005 wallet payment subset). Testnet is out of scope for v1.
-
-### 4.3 Signing key
-
-**v1 signs with the root vault key; `from` is the vault's main address.**
-
-Rationale:
-- The vault address is already the agent's payment identity — recipients can
+- The vault address is already the agent's payment identity — recipients
   reply, pay, or x402-settle to the same address with no mapping table.
-- The inbox scan (§7) runs on the vault address; using it as the sender
-  identity keeps one address per agent.
+- The inbox scan (§8) runs on the vault address; using it as sender identity
+  keeps one address per agent.
 - A derived subkey (e.g. `dogfood/message/v1`, mirroring `dogfood/osp/v1`)
   would follow the repo's role-key doctrine, but third parties cannot prove
-  a subkey was derived from a particular parent vault (the same limitation
-  attestations document). That breaks addressability for no v1 gain.
+  a subkey derived from a particular parent vault (the attestation
+  limitation). That breaks addressability for no v1 gain. The §3.4 agent-pin
+  binding is the identity layer, not a subkey.
 
-Trust statement (identical in spirit to attestations): the AIP signature
-proves **control of the sender vault key at signing time**. It does not
-prove the sender's real-world identity, honesty, or that the body is true.
+Trust statement: the signature proves **control of the sender vault key at
+signing time** — not real-world identity, honesty, or truth of the body.
 
-## 5. Transaction shape and cost
+### 5.5 Size and cost
+
+Keep the envelope body ≤ `maxBodyBytes` (default 4 KB). A small message tx
+is roughly 300–500 bytes → ~300–500 sats at recent fee rates, plus the 1-sat
+tip. Caps and accounting are fee-inclusive. Messages are short coordination
+artifacts, not file transfer; `content_uri` can point at larger off-chain
+content if ever needed (out of scope for v1).
+
+## 6. Transaction shape
+
+### 6.1 Option B (Locus mint)
 
 ```
-inputs:  root-vault coins, smallest-first (existing selection doctrine)
-out 0:   1 sat  → recipient vault address (canonical P2PKH)   [notification]
-out 1:   0 sats → OP_RETURN (B | MAP | AIP, §4.1)             [message]
+inputs:  sender vault UTXOs, smallest-first, EXCLUDING inbox message tips
+         (§3.5.1), total ≥ fee + 1 sat
+out 0:   1 sat  → P2PKH(recipient owner address)   [Locus tip / pin]
+out 1:   0 sats → OP_FALSE OP_RETURN <Locus mint JSON, §5.1>
 out 2:   change → sender vault address
 fee:     from vault coins, existing estimateFee discipline
 ```
 
-**Why the 1-sat notification output matters:** pure OP_RETURN data is
-invisible to address-based explorers — it never appears in the recipient's
-address history. The 1-sat P2PKH output makes the message tx show up in the
-recipient's WoC/JungleBus address history, so the inbox (§7) works with zero
-extra infrastructure. BSV has no dust limit; 1-sat outputs are standard
-1Sat-ecosystem practice.
+Mirrors `buildMintTx` (`transaction-builder.ts:970`): ordinal tip
+(`DEFAULT_ORDINAL_SATOSHIS = 1`) P2PKH to owner + JSON OP_RETURN.
 
-Ambiguity hygiene (OSP-0001 lesson applied):
-- The notification is **exactly 1 sat** to a canonical P2PKH script distinct
-  from the change script; change rides the sender address, never the
-  notification script.
+### 6.2 Option A (BitCom)
+
+```
+inputs:  root-vault coins, smallest-first
+out 0:   1 sat  → recipient vault address (canonical P2PKH)   [notification]
+out 1:   0 sats → OP_RETURN (B | MAP | AIP, §5.3)             [message]
+out 2:   change → sender vault address
+```
+
+### 6.3 Ambiguity hygiene (both options, OSP-0001 lesson)
+
+- The tip/notification is **exactly 1 sat** to a canonical P2PKH script
+  distinct from change; change rides the **sender** address, never the tip.
 - A message tx is **not an OSP transition**: it carries no OSP envelope
   output and must never be parsed as one. Door tip-liveness scans look for
-  exactly-one-envelope; B/MAP/AIP pushes are not OSP envelopes, so message
-  txs cannot interfere — but the inbox and door scanners must keep their
-  filters disjoint, and tests must assert this both ways.
+  exactly-one-envelope; Locus JSON / B|MAP|AIP pushes are not OSP envelopes,
+  so message txs cannot interfere — but inbox and door scanners must keep
+  filters disjoint, and tests assert this both ways.
 - The OSP-0005 wallet payment subset rejects OP_RETURN/envelope-like payment
-  scripts; that restriction is unchanged. Messages are their own operation
-  kind, not a payment workaround.
+  scripts; unchanged. Messages are their own operation kind, not a payment
+  workaround.
+- BSV has no dust limit; 1-sat outputs are standard 1Sat-ecosystem practice.
 
-**Cost:** a small message tx is roughly 300–500 bytes → ~300–500 sats at
-recent fee rates (attestations cost ~1,087 sats because inscriptions are
-larger), plus the 1-sat notification. Caps and accounting are fee-inclusive.
-
-## 6. Message types
+## 7. Message types
 
 `type` is a namespaced lowercase identifier, regex `^[a-z][a-z0-9.-]{0,63}$`
 (same shape as attestation types). v1 defines three:
 
-### 6.1 `message` — generic
-`body` is a plain UTF-8 string. The coordination primitive: task handoffs,
-negotiation text, references to txids/URLs. No structure imposed.
+### 7.1 `message` — generic
+`body` is a plain UTF-8 string ≤ `maxBodyBytes`. The coordination primitive:
+task handoffs, negotiation text, references to txids/URLs. No structure
+imposed.
 
-### 6.2 `osp.grant.request` — cross-agent door grant ask
-`body` is a structured object mirroring the existing `request_osp_grant`
-contract **exactly**, plus cross-vault door identification:
+### 7.2 `osp.grant.request` — cross-agent door grant ask
+`body` mirrors the existing `request_osp_grant` contract **exactly**, plus
+cross-vault door identification:
 
 ```json
 {
@@ -219,20 +436,19 @@ contract **exactly**, plus cross-vault door identification:
 }
 ```
 
-- `scopeCanonical` travels **byte-pinned**. If it carries OSP-0005 payment
-  terms, they are `{amount_sats, script}` with the wallet's canonical
-  25-byte lowercase P2PKH restriction — never an address, never rewritten.
+- `scopeCanonical` travels **byte-pinned**. OSP-0005 payment terms are
+  `{amount_sats, script}` with the wallet's canonical 25-byte lowercase
+  P2PKH restriction — never an address, never rewritten.
 - The receiving agent validates with the **same rules `requests.ts` applies
   at filing** (scope canonicalization, payment script shape, field types)
-  before anything enters its queue. Validation happens before any key or
-  chain access, exactly like the local path.
+  before anything enters its queue — before any key or chain access.
 - Filing into the local escalation queue remains an **explicit agent action
   via the existing `request_osp_grant` tool**. v1 does NOT auto-file inbox
-  messages into the queue (fail-closed; auto-filing is an open decision, §12).
-- The human approval and signing path is unchanged: CLI-only, exact bytes,
-  nothing widen-able after the decision.
+  messages (fail-closed; auto-filing is an open decision, §13).
+- Human approval and signing unchanged: CLI-only, exact bytes, nothing
+  widen-able after the decision.
 
-### 6.3 `osp.grant.receipt` — grant delivered
+### 7.3 `osp.grant.receipt` — grant delivered
 ```json
 {
   "grantTxid": "<64 lowercase hex>",
@@ -244,34 +460,41 @@ The requesting agent verifies the receipt **on-chain** (existing door
 tracking / tip-liveness evidence), not by trusting the message. The message
 is a pointer; the chain is the truth.
 
-Future types (`x402.offer`, `payment.request`, …) extend the namespace
-without format changes. Unknown types are surfaced by the inbox as
-uninterpreted envelopes (verified signature, raw body) — never executed.
+Future types (`x402.offer`, `payment.request`, `attestation`, …) extend the
+namespace without format changes. Unknown types are surfaced by the inbox as
+uninterpreted envelopes (verified signature, raw body) — never executed
+(§6.7 untrusted-content rule).
 
-## 7. Inbox and discovery
+## 8. Inbox and discovery
 
-**v1: read-only WoC address-history scan.**
-- Scan the vault address's confirmed + mempool history (existing paced WoC
-  helpers), fetch candidate txs, filter for the BitCom layout with
-  `MAP app=dogfood` and notification payee = this vault.
-- Parse → re-canonicalize → AIP-verify each. Return
-  `{from, to, type, body, txid, blockTime|firstSeen, verified}`.
-- Dedupe by txid; track a high-water mark locally so repeated scans are
-  cheap. Signature failures are reported as `verified:false`, never dropped
-  silently and never trusted.
-- Exposed as CLI `messages` and MCP `messages` (read-only, MCP-safe: public
-  on-chain data only, no key access).
+**Platform-native view (Option B):** the recipient's owned message-pin set,
+read by any Locus indexer (spec §5 recipe). The wallet's own read-only inbox:
 
-**Upgrade path: JungleBus push.** A subscription filtered on BitCom/MAP
-output types with `app=dogfood` gives real-time delivery instead of polling.
-JungleBus already parses B/MAP/AIP natively. Requires a subscription ID
-(human dashboard step) and a small listener service — a later slice, not v1.
+- Scan the vault address's confirmed + mempool history (paced WoC helpers),
+  fetch candidate txs, filter Locus mints with `subtype:"agent-message"` and
+  tip payee = this vault (Option A: filter BitCom `MAP app=dogfood`).
+- Parse `content` → re-canonicalize → verify the embedded signature; resolve
+  agent-pin bindings (§3.4). Return
+  `{from, fromAgentPin?, to, type, body, txid, pinId?, blockTime|firstSeen,
+  verified, bound}`.
+- Dedupe by txid; track a high-water mark locally so repeated scans are cheap.
+  Signature failures reported as `verified:false`, never dropped silently,
+  never trusted. Unresolvable identity surfaced as `bound:false`.
+- **Keyless and read-only:** no vault decrypt, no policy mutation, no spend.
+  MCP-safe (public on-chain data only).
+- **Spam filtering is the client's job** (§10.2): recipient policy (§9)
+  decides what to surface; the index stays neutral.
+
+**Upgrade path:** JungleBus BitCom/MAP subscription (Option A) or a Locus
+indexer feed (Option B) for real-time push instead of polling. Requires a
+subscription ID (human dashboard step) and a small listener — a later slice,
+not v1.
 
 Delivery semantics are **best-effort, poll-based**: no guaranteed ordering,
-no guaranteed delivery, no read receipts. Agents must treat the chain as
-the source of truth and messages as hints.
+no guaranteed delivery, no read receipts. The chain is the source of truth;
+messages are hints.
 
-## 8. Policy and safety
+## 9. Policy and safety
 
 New `policy.json` block, **absent = DISABLED** (fail-closed, same as `osp`):
 
@@ -289,24 +512,32 @@ New `policy.json` block, **absent = DISABLED** (fail-closed, same as `osp`):
   array = allowlist of canonical P2PKH addresses; `[]` = deny all.
 - **Killfile always wins**, checked before signing and rechecked before
   broadcast (the `8963a00` lesson).
-- Caps charge **everything that leaves the vault** (miner fee + 1-sat
-  notification), fee-inclusive, against a dedicated `messages` usage scope.
-- If a BRC-181 envelope is installed, it additionally gates the notification
+- Caps charge **everything that leaves the vault** (miner fee + 1-sat tip),
+  fee-inclusive, against a dedicated `messages` usage scope.
+- If a BRC-181 envelope is installed, it additionally gates the tip
   destination + total (same pattern as OSP paid grants).
 - Shared payment guard reservation before signing; fsynced intent + evidence
   before broadcast; **single-attempt ARC**; ambiguous acknowledgement = HOLD
   for human reconciliation, never auto-retry. Pre-commitment failures release
   the reservation (safe to retry); post-broadcast uncertainty does not.
-- The MCP tool never logs key material; message bodies are public by design
-  (§10) but the tool still treats vault internals as secret.
+- The MCP tool never logs key material; bodies are public by design (§11) but
+  vault internals stay secret.
+
+**v2 additions:**
+
+- **Coin-selection exclusion (§3.5.1):** inbox message-tip UTXOs are excluded
+  from funding selection so sending a message never accidentally transfers an
+  owned inbox pin. New persisted marking + new tests.
+- **Untrusted content (§6.7):** inbox output marks body/metadata untrusted;
+  never auto-executed, rendered as HTML, or fed to an LLM unmarked.
 
 **Autonomy contrast with OSP:** OSP grant *signing* is human-only because a
-grant authorizes access. Message signing is **agent-autonomous under the
-caps above** because a message only spends capped sats and publishes public
-data — that autonomy is the feature. The escalation queue remains the path
-for anything that authorizes access or exceeds policy.
+grant authorizes access. Message signing is **agent-autonomous under the caps
+above** because a message only spends capped sats and publishes public data —
+that autonomy is the feature. The escalation queue remains the path for
+anything that authorizes access or exceeds policy.
 
-## 9. CLI and MCP surface (planned)
+## 10. CLI and MCP surface (planned)
 
 CLI (owner):
 ```bash
@@ -323,64 +554,121 @@ MCP (agent):
 Signing for `agent_message` lives inside the guarded operation; there is no
 raw-signing MCP tool. Grant signing stays off MCP entirely (unchanged).
 
-## 10. Trust boundaries and non-goals
+## 11. Trust boundaries and non-goals
 
-- **Public and permanent.** Every message body is readable by anyone,
-  forever. v1 is for coordination, not secrets. Never put keys, credentials,
-  or private data in a message. Encryption (BRC-2 ECIES to the recipient's
-  pubkey, supported by `@bsv/sdk`) is a clean follow-up slice, not v1.
-- **Key control ≠ identity ≠ truth.** A verified signature proves the sender
-  vault key signed these bytes. It proves nothing about who controls that
-  vault off-chain or whether the body is honest.
+- **Authorship ≠ ownership ≠ identity ≠ truth.** The embedded signature
+  proves the sender vault key signed these bytes (authorship). Locus
+  attribution proves the recipient owns the pin (ownership/delivery) — it
+  does **not** prove who sent it (§3.3). Agent-pin refs bind addresses to
+  platform identities; an unresolvable binding is `bound:false`, never
+  silently trusted. None of these proves off-chain identity or honesty.
+- **Public and permanent.** Every body is readable by anyone, forever. v1 is
+  for coordination, not secrets. Never put keys, credentials, or private data
+  in a message. Encryption (BRC-2 ECIES to the recipient's pubkey, supported
+  by `@bsv/sdk`) is a clean follow-up slice, decrypted only after the
+  recipient's policy accepts (gate-before-decrypt, `8963a00`).
 - **No derivation proof.** `from` is a self-claimed vault address backed by
-  key control; nothing binds it to a real-world agent identity (BAP identity
-  integration is a possible later layer).
-- **Best-effort delivery.** Poll-based; recipients must scan. No ordering,
-  no read receipts, no censorship resistance beyond the chain itself.
+  key control; the agent-pin binding (§3.4) is the identity layer, not a
+  derivation proof. BAP identity integration is a possible later layer.
+- **Best-effort delivery.** Poll-based; recipients must scan. No ordering, no
+  read receipts, no censorship resistance beyond the chain itself.
 - **Not an OSP transition, not a payment rail.** Messages do not open doors,
-  do not settle x402, and do not move value beyond the 1-sat notification +
-  fee. They coordinate; the existing rails settle.
-- **Rate limits.** WoC polling is paced; heavy inbox use should migrate to
-  JungleBus (§7).
+  do not settle x402, and move no value beyond the 1-sat tip + fee. They
+  coordinate; the existing rails settle.
+- **Rate limits.** WoC polling is paced; heavy inbox use migrates to JungleBus
+  / a Locus feed (§8).
 
-## 11. Implementation slices (bounded, TDD)
+## 12. Implementation slices (bounded, TDD)
 
-Each slice is independently verifiable; funded steps require explicit
+Each slice independently verifiable; funded steps require explicit
 authorization. Disposable vaults + intercepted network for all tests.
 
-- **S1 — Codec + verification (no broadcast).** Envelope canonicalization
-  (reuse `osp-scope.ts` JCS), BitCom push builder/parser, strict-AIP
-  sign/verify, golden vectors byte-pinned in `testdata/message-vectors.json`
-  (pattern: `osp-vectors.json`). Round-trip and tamper tests.
+- **S1 — Codec + verification (no broadcast).** Locus mint payload
+  builder/parser (reuse `@locus/protocol` `buildMintTx`/`findLocusPayload`
+  where possible) + signed-envelope canonicalize/sign/verify (reuse
+  `osp-scope.ts` JCS). Option A BitCom push builder + strict-AIP sign/verify.
+  Golden vectors byte-pinned in `testdata/message-vectors.json` (pattern:
+  `osp-vectors.json`); round-trip and tamper tests. **Read-only verification
+  task:** confirm coordinate-less object-mint indexing against `schemas/` +
+  `pin_chain_verifier.ex` (§3.5.3) before S2 commits to Option B.
 - **S2 — Guarded send.** `policy.messages` schema + evaluation, usage scope,
-  BRC-181 hook, shared guard/intent/evidence/HOLD, CLI `agent-message`,
-  MCP `agent_message`. Policy-spelling and MCP-boundary tests.
-- **S3 — Inbox.** WoC scan, filter, parse, verify, dedupe, high-water mark;
-  CLI `messages`, MCP `messages` / `message_verify`. Assert disjointness
-  from OSP door scanners both ways.
+  BRC-181 hook, shared guard/intent/evidence/HOLD, coin-selection exclusion of
+  inbox tips, CLI `agent-message`, MCP `agent_message`. Policy-spelling and
+  MCP-boundary tests.
+- **S3 — Inbox.** WoC scan, Locus/BitCom filter, parse, verify, agent-pin
+  binding resolution, dedupe, high-water mark; CLI `messages`, MCP
+  `messages` / `message_verify`. Assert disjointness from OSP door scanners
+  both ways.
 - **S4 — OSP typed messages.** `osp.grant.request` / `osp.grant.receipt`
   bodies, validation parity with `requests.ts`, cross-agent flow tests
   (message → file → approve → grant → receipt → on-chain verify) with
   intercepted chain.
-- **S5 — Funded acceptance (authorized only).** One small message between
-  two disposable mainnet vaults; optionally a full grant-request round trip
-  on a test door. Verify tx on WoC, inbox receipt, signature, caps delta.
+- **S5 — Funded acceptance (authorized only).** One small message between two
+  disposable mainnet vaults; optionally a full grant-request round trip on a
+  test door. Verify tx on WoC, inbox receipt, signature, caps delta, and mined
+  status independently.
 
 Gate for every slice: `bun run verify` green (full tests + typecheck) before
-commit. This design doc is intentionally NOT added to `package.json`
-`files` (reviewed-doc allowlist tripwire).
+commit. This design doc is intentionally NOT added to `package.json` `files`
+(reviewed-doc allowlist tripwire).
 
-## 12. Open decisions
+## 13. Open decisions
 
-1. **Encryption timing** — plaintext v1 (recommended) vs BRC-2 ECIES from
-   the start. Encryption adds recipient-key handling and an MCP decryption
-   surface; defer unless a concrete private-coordination need appears.
-2. **JungleBus vs polling** — v1 polls; subscription needs a human dashboard
-   step and a listener. Revisit when inbox latency matters.
-3. **Auto-filing grant requests** — should verified `osp.grant.request`
-   messages auto-file into the owner queue? v1: no (explicit agent action).
-   Auto-filing is safe-ish (human still approves) but changes the queue's
-   threat model; decide separately.
-4. **Role subkey** — migrate signing to `dogfood/message/v1` if a derivation
-   -proof mechanism (e.g. BAP) lands; v1 uses the root key for addressability.
-5. **SIGMA binding** — input-bound signatures as v2 hardening (§4.1).
+1. **Format elevation (Option A vs B, §3.6).** Recommend B; confirm
+   coordinate-less mint indexes cleanly (S1) before committing. If not, anchor
+   at the recipient agent pin or ship A. A design choice, not a Locus spec
+   change.
+2. **Identity binding depth.** How strictly to enforce agent-pin resolution in
+   v1 (surface-as-unbound vs reject). Recommend surface-as-unbound; reject is a
+   later policy option.
+3. **Coin-selection marking.** How inbox tips are marked/persisted so selection
+   excludes them without breaking existing spend rails.
+4. **Encryption timing.** Plaintext v1 (recommended) vs BRC-2 ECIES from the
+   start. Encryption adds recipient-key handling and an MCP decryption surface;
+   defer unless a concrete private-coordination need appears.
+5. **JungleBus vs polling.** v1 polls; subscription needs a human dashboard step
+   and a listener. Revisit when inbox latency matters.
+6. **Auto-filing grant requests.** Should verified `osp.grant.request` messages
+   auto-file into the owner queue? v1: no (explicit agent action). Auto-filing
+   is safe-ish (human still approves) but changes the queue's threat model;
+   decide separately.
+7. **Role subkey.** Migrate signing to `dogfood/message/v1` if a derivation-proof
+   mechanism (e.g. BAP) lands; v1 uses the root key for addressability.
+8. **SIGMA binding.** Input-bound signatures as later hardening (§5.3).
+9. **Subtype naming.** `agent-message` is convention; align with any Locus
+   note-subtype convention (§10.3) if renderers adopt one. No consensus change.
+10. **Standalone protocol status.** Messaging stays a Dogfood application format
+    riding Locus until a second non-Dogfood consumer justifies a standalone
+    spec. Do not prematurely protocol-ize.
+
+## 14. Provenance / spec references
+
+Every Locus claim above is grounded in:
+
+- **Locus Protocol Specification v3.0**, fetched 2026-11-17 from
+  `https://gryd.world/protocol/SPEC.md` (canonical home; "Draft for public
+  review — describes the format live on BSV mainnet today"). Cited: §3.1 (tip
+  output), §4 (canonical JSON payload), §5 (discovery), §6.4
+  (owner/owner_pubkey), §6.7 (untrusted metadata), §7.2 (mint), §9 (subtype
+  convention), §10.1–10.5 (ownership / permissionless attribution /
+  immutability / insert-only / transfers). Local copy:
+  `cache/scratch/locus-spec.md`.
+- **Reference implementation `@locus/protocol` 0.2.1**, in
+  `the-grid-agent-splash/packages/locus-protocol`, grid checkout HEAD
+  `79a458f157b02a5456548e2faa920ae0e39225aa` (read-only). Cited:
+  `transaction-builder.ts` `DEFAULT_PROTOCOL_VERSION=3` (:28),
+  `DEFAULT_ORDINAL_SATOSHIS=1` (:31), `resolveOwnerAddress` (:507),
+  `buildMintPayload` (:924, coordinate-less permitted), `buildMintTx` (:970,
+  1-sat P2PKH tip + JSON OP_RETURN); `parse.ts:findLocusPayload`.
+- **Verification targets before implementation (not yet read):** `schemas/`
+  beside SPEC.md, and the reference indexer `the-grid-api`
+  `pin_chain_verifier.ex` + `pin_indexer.ex` (spec §13). Coordinate-less
+  object-mint indexing (§3.5.3) MUST be confirmed against these before S2.
+
+OSP: `https://github.com/futureman19/open-and-shut-protocol` (OSP-0001…0008);
+wallet OSP hardening commits `16af988`, `c5ff067`, `8963a00`; `src/osp.ts`,
+`src/osp-scope.ts`, `src/requests.ts`.
+
+This document is excluded from the npm package `files` list (unreviewed
+design). It authorizes no code, no broadcast, and no shared-protocol
+modification.
