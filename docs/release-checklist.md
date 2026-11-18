@@ -4,16 +4,30 @@ Status: **ready for the human phase.** Everything code-side is green.
 This document is operational, not product docs — it stays out of the package
 (the `files` allowlist controls what ships; this file is not in it).
 
-## Phase 0 — preflight (already done, 2026-11-12)
+## Phase 0 — preflight (refreshed 2026-11-18 at `ad6b878`, S1–S5 landed)
 
-- [x] `bun run verify` green — 1094 tests + typecheck (commit `a3a019e`)
-- [x] `bun run verify:package` green — real `npm pack` + isolated install smoke
-- [x] Pack inventory: 66 files, ~188 KB packed / ~641 KB unpacked
+- [x] `bun run verify` green — typecheck + **1403 tests / 0 fail** (9,174
+      expect calls). Note: one earlier run the same day showed 8 transient
+      test failures during a WoC rate-limit window; immediate re-run was
+      clean. If `prepublishOnly` aborts at publish time, wait ~2 min and
+      re-run `npm publish --access public`.
+- [x] `bun run verify:package` green — real `npm pack` + isolated install
+      smoke (installed bin help/doctor, MCP discovery, ALLOWLIST denial,
+      optional imports; network forbidden in smoke).
+- [x] Pack inventory: **75 files, 231,884 B packed / 785,288 B unpacked** —
+      exactly the `files` allowlist + package.json; no tests/site/scripts/
+      internal docs.
 - [x] Version decision: ship **0.1.0** as-is (never published; no bump needed)
-- [x] Tag namespace clean (no existing tags); local npm CLI 11.6.2 (≥11.5.1 ✓)
-- [ ] Open call: Codex's x402-permits slice is in flight. **Recommendation:
-      wait for it to land (it completes the permits story), release after.
-      If it blocks, release 0.1.0 without it — permits already work on `send`.**
+- [x] Tag namespace clean (0 tags); local npm CLI 11.6.2 (≥11.5.1 ✓);
+      working tree clean; `main` == `origin/main` at preflight.
+- [x] Former open call RESOLVED: x402-permits slice is in the tree
+      (`src/bsv-x402-permits.test.ts`); agent messaging S1–S5 also landed
+      (live funded acceptance `e02893c9…`). Release 0.1.0 as-is.
+- [ ] **Scope prerequisite (human):** registry search shows **0 packages
+      under `@dogfood`**. Before publishing, confirm you own (or create,
+      free for public packages) the npm org `dogfood` at
+      npmjs.com/org/create — a scoped first publish requires membership in
+      the scope's org (or a username match).
 
 ## Phase 1 — human at the keyboard (one-time, ~15 min)
 
