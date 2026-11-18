@@ -45,7 +45,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts agent-attest-verify <txid>
   bun src/cli.ts agent-mint <name> <lat> <lng> [--no-broadcast]
   bun src/cli.ts agent-register <mint-txid> <name> <lat> <lng> [--no-post]
-  bun src/cli.ts agent-list <ordinal-outpoint> <price-sats> [--no-broadcast]
+  bun src/cli.ts agent-list <ordinal-outpoint> <price-sats> [--no-broadcast] [--seller-main]
   bun src/cli.ts agent-cancel-listing <listing-outpoint> [--no-broadcast]
   bun src/cli.ts agent-message <to-address> <body> [--type T] [--json]  # guarded 546-sat inbox message
   bun src/cli.ts messages [--address A] [--from A] [--type T] [--limit N] [--json]  # read-only inbox scan
@@ -99,6 +99,7 @@ agent-mint and agent-register are human-only: broadcast / metadata POST by defau
 agent-call is human-only: prints an offline signed Gryd envelope; never sends it.
 agent-buy is human-only: purchases on chain by default; --no-broadcast is an unsigned preview.
 agent-list and agent-cancel-listing are human-only: broadcast by default; unsigned --no-broadcast preview.
+agent-list --seller-main pins cancellation+signer to the owner key (backend-compatible seller=owner); default is property-seller.
 agent-message is policy-gated: requires policy.messages (absent = disabled); killfile wins; no automatic retry.
 messages is read-only and keyless: WoC inbox scan, no vault decryption, no broadcast; bodies are UNTRUSTED peer data.
 Phase 3 backend compatibility is pending; do not use live until the Gryd verifier is updated.
@@ -210,12 +211,13 @@ async function main() {
       break;
     }
     case "agent-list": {
+      const listFlags = new Set(["--no-broadcast", "--seller-main"]);
       if (!a || !b || !/^[0-9]+$/.test(b) || !Number.isSafeInteger(Number(b)) || Number(b) <= 0
-        || rest.length > 1 || (rest.length === 1 && rest[0] !== "--no-broadcast")) {
-        die("Usage: agent-list <ordinal-outpoint> <price-sats> [--no-broadcast]; positive decimal integer sats only");
+        || rest.length > 2 || rest.some(f => !listFlags.has(f)) || new Set(rest).size !== rest.length) {
+        die("Usage: agent-list <ordinal-outpoint> <price-sats> [--no-broadcast] [--seller-main]; positive decimal integer sats only");
       }
       const { listAgent } = await import("./gryd-listings");
-      console.log(JSON.stringify(await listAgent({ root, ordinalOutpoint: a, priceSats: Number(b), noBroadcast: rest[0] === "--no-broadcast" }), null, 2));
+      console.log(JSON.stringify(await listAgent({ root, ordinalOutpoint: a, priceSats: Number(b), noBroadcast: rest.includes("--no-broadcast"), sellerIdentity: rest.includes("--seller-main") ? "main" : "property" }), null, 2));
       break;
     }
     case "agent-cancel-listing": {
