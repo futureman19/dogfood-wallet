@@ -66,6 +66,7 @@
     "docs/bridge-provider-contracts.md",
     "docs/x402-v1-client-funding-gap.md",
     "docs/package-install.md",
+    "src/agent-message.ts",
     "src/allowance.ts",
     "src/auth-sign.ts",
     "src/requests.ts",

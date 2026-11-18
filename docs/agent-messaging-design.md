@@ -182,13 +182,18 @@ Going Locus-native is not free:
    execute it, never render it as HTML, never feed it to an LLM without
    marking it untrusted. The inbox surfaces unknown subtypes as
    uninterpreted data. Reinforces v1's "never auto-execute."
-3. **Coordinate-less mint divergence.** The reference builder permits `mint`
-   without `lat`/`lng` (`buildMintPayload` asserts coords only when
-   provided), but spec §7.2 prose says mint is "identical to place" (which
-   requires coords). A message has no natural GPS anchor. **Verify against
-   `schemas/` + `pin_chain_verifier.ex` before implementation** whether
-   coordinate-less object mints index cleanly; if not, anchor at the
-   recipient agent pin's location or fall back to Option A. Do not assume.
+3. **Coordinate-less mint divergence — VERIFIED NEGATIVE at S1 (2026-11-17).**
+   Read-only check against the reference indexer (`the-grid-agent-splash`,
+   `locus-mobile/backend/locus_api`): `schemas/mint.json` requires only
+   `p/v/op/owner/owner_pubkey` (coords optional) and `pin_chain_verifier.ex`
+   gates only `v`/`op` — but pin persistence rejects coordinate-less mints:
+   the pin changeset/DB require `lat`, `lng`, `location`, `geohash`,
+   `placed_at` (`null: false`), the changeset never casts/stores `content`
+   (only `content_uri`), and the type list excludes `agent` (object pins get
+   `address_prefix:"/1"`). **Option B as designed is not indexed by the
+   current reference indexer.** Per the fallback below, S1 ships Option A;
+   Option B remains the target pending indexer evolution (no unilateral
+   shared-protocol change).
 4. **Insert-only by txid** (§10.4): replays are ignored by indexers. Aligns
    with the wallet's reserve-before-broadcast replay store; reuse it.
 5. **Subtype rendering is convention.** Indexers index the mint; special
@@ -216,6 +221,12 @@ interop/fallback path (e.g. for coordinate-less-mint indexing gaps,
 §3.5.3). Recorded as a decision in §13 — a design choice, not a unilateral
 protocol change. If native indexer discovery proves low-value in practice,
 Option A is the cheaper steady state.
+
+**S1 update (2026-11-17):** the §3.5.3 check came back negative — the
+reference indexer does not persist coordinate-less mints or their `content`.
+The fallback therefore applies: **Option A is the active transport** (codec
+shipped at S1, `src/agent-message.ts`), and the Option B codec is retained
+and byte-pinned so it activates unchanged if/when the indexer evolves.
 
 ## 4. Existing primitives reused
 
@@ -310,36 +321,58 @@ JSON; the signature covers the envelope **excluding** `sig`:
 - Addresses are canonical mainnet P2PKH only (same restriction philosophy
   as the OSP-0005 wallet payment subset). Testnet out of scope for v1.
 
-### 5.3 Option A — BitCom B | MAP | AIP layout (interop/fallback)
+### 5.3 Option A — BitCom B | MAP | AIP layout (active transport since S1)
 
-One OP_RETURN, chained per BitCom so ecosystem indexers (JungleBus, 1Sat
-tooling) parse and verify natively:
+One OP_RETURN (bare `6a` per §6.2), chained per BitCom so ecosystem indexers
+(JungleBus, 1Sat tooling) parse and verify natively. Exactly **18 pushes**,
+pipes included, no empty pushes:
 
 ```
 OP_RETURN
   | B_PREFIX                              (19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut)
-  | <envelope>                            (UTF-8 canonical JSON, §5.2, single push)
+  | <envelope>                            (UTF-8 canonical JSON, §5.2, single push, no sig)
   | "application/json"
   | "utf-8"
+  | "|"
   | MAP_PREFIX                            (1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5)
   | "SET"
   | "app"  | "dogfood"
   | "type" | <message type>               (§7)
   | "to"   | <recipient vault address>
+  | "|"
   | AIP_PREFIX                            (15PciHG22SNLQJXMoSUaWVi7WSqc7hCfva)
   | "BITCOIN_ECDSA"
   | <sender vault address>
-  | <base64 signature>
+  | <signature: raw 65-byte compact push>
 ```
 
-- **Strict AIP**: signature computed per the AIP spec over the preceding
-  OP_RETURN pushdata, so third-party AIP verifiers validate it without
-  Dogfood-specific knowledge. Exact byte rules pinned to golden vectors at
-  S1, sourced from the AIP spec and observed indexer behavior.
-  `field_indexes` omitted (default: all preceding data pushes).
-- In Option A the envelope `sig` field may be omitted in favor of the
-  chained AIP signature (the AIP push is the authorship proof); the
-  canonical envelope-minus-sig bytes are what AIP signs.
+- **AIP byte rules — PINNED at S1** (`src/agent-message.ts`, golden vectors
+  in `testdata/message-vectors.json`, cross-checked against three reference
+  implementations and one real mainnet anchor tx):
+  - **Preimage** = `0x6a` || raw concatenation of ALL pushdata *contents*
+    left of the AIP prefix (pipes included, length prefixes excluded),
+    hashed with the Bitcoin Signed Message magic hash. Our layout has no
+    empty pushes, so the bitcoinfiles-sdk rule and `@1sat/templates`'
+    per-protocol reconstruction produce identical bytes.
+  - **Canonical build**: raw 65-byte compact recoverable signature pushed
+    directly (bitcoinfiles-sdk / `@1sat/templates` convention), compressed
+    key, header 31–34, low-S. Signing is deterministic (DRBG seeded by
+    key+message), so vectors are byte-stable.
+  - **Parse interop**: also accepts the signature as base64-ASCII text
+    (go-aip convention) and uncompressed-key headers 27–30 (legacy anchors).
+    Envelope-level `sig` (§5.2) is always compressed.
+  - **Anchor**: tx `5633bb966d9531d22df7ae98a70966eebe4379d400d74ac948bf5b4f2867092c`
+    (B | AIP | AIP, uncompressed key, empty filename push) verifies through
+    the same preimage rule — pinned as an interop fixture.
+  - `field_indexes` omitted (default: all preceding data pushes).
+- In Option A the envelope `sig` field is omitted in favor of the chained
+  AIP signature (the AIP push is the authorship proof); the canonical
+  envelope-minus-sig bytes are embedded in the B push and covered by the
+  AIP preimage. Parsers accept an embedded `sig` too and verify it when
+  present.
+- **Strict shape parsing**: minimal pushes only (PUSHDATA1/2/4 accepted when
+  minimal), exact push count/order, MAP values cross-checked against the
+  envelope (`app`/`type`/`to`), AIP address must equal `envelope.from`.
 - **SIGMA upgrade path (not v1):** SIGMA binds the signature to a spent
   input (`sha256(prevTxId + prevVout)`), preventing cross-transaction replay
   of the signed bytes. AIP alone does not bind to inputs. v1 accepts this
@@ -583,14 +616,17 @@ raw-signing MCP tool. Grant signing stays off MCP entirely (unchanged).
 Each slice independently verifiable; funded steps require explicit
 authorization. Disposable vaults + intercepted network for all tests.
 
-- **S1 — Codec + verification (no broadcast).** Locus mint payload
-  builder/parser (reuse `@locus/protocol` `buildMintTx`/`findLocusPayload`
-  where possible) + signed-envelope canonicalize/sign/verify (reuse
-  `osp-scope.ts` JCS). Option A BitCom push builder + strict-AIP sign/verify.
+- **S1 — Codec + verification (no broadcast). ✅ DONE 2026-11-17.**
+  `src/agent-message.ts`: signed-envelope canonicalize/sign/verify (reuses
+  `osp-scope.ts` JCS + BSM), Option A BitCom push builder + strict-AIP
+  sign/verify (18-push layout, §5.3), Option B Locus mint payload
+  builder/parser (coordinate-less v1 shape, retained for indexer evolution).
   Golden vectors byte-pinned in `testdata/message-vectors.json` (pattern:
-  `osp-vectors.json`); round-trip and tamper tests. **Read-only verification
-  task:** confirm coordinate-less object-mint indexing against `schemas/` +
-  `pin_chain_verifier.ex` (§3.5.3) before S2 commits to Option B.
+  `osp-vectors.json`), including a real mainnet AIP anchor tx as an interop
+  fixture; 59 tests (round-trip, tamper, strict-shape, disjointness from OSP
+  envelopes both ways). Read-only indexing check completed: **negative** —
+  see §3.5.3; Option A is the active transport, Option B deferred.
+  No broadcast, no vault access, no CLI/MCP surface added.
 - **S2 — Guarded send.** `policy.messages` schema + evaluation, usage scope,
   BRC-181 hook, shared guard/intent/evidence/HOLD, coin-selection exclusion of
   inbox tips, CLI `agent-message`, MCP `agent_message`. Policy-spelling and
@@ -614,10 +650,12 @@ commit. This design doc is intentionally NOT added to `package.json` `files`
 
 ## 13. Open decisions
 
-1. **Format elevation (Option A vs B, §3.6).** Recommend B; confirm
-   coordinate-less mint indexes cleanly (S1) before committing. If not, anchor
-   at the recipient agent pin or ship A. A design choice, not a Locus spec
-   change.
+1. **Format elevation (Option A vs B, §3.6). RESOLVED at S1 (2026-11-17):**
+   coordinate-less mints do NOT index in the current reference indexer
+   (§3.5.3 verdict), so **Option A ships first**; the Option B codec is
+   implemented and byte-pinned, activating unchanged if the indexer evolves.
+   Revisit when the reference indexer stores coordinate-less object mints
+   with `content`. A design choice, not a Locus spec change.
 2. **Identity binding depth.** How strictly to enforce agent-pin resolution in
    v1 (surface-as-unbound vs reject). Recommend surface-as-unbound; reject is a
    later policy option.
@@ -660,15 +698,26 @@ Every Locus claim above is grounded in:
   `DEFAULT_ORDINAL_SATOSHIS=1` (:31), `resolveOwnerAddress` (:507),
   `buildMintPayload` (:924, coordinate-less permitted), `buildMintTx` (:970,
   1-sat P2PKH tip + JSON OP_RETURN); `parse.ts:findLocusPayload`.
-- **Verification targets before implementation (not yet read):** `schemas/`
-  beside SPEC.md, and the reference indexer `the-grid-api`
-  `pin_chain_verifier.ex` + `pin_indexer.ex` (spec §13). Coordinate-less
-  object-mint indexing (§3.5.3) MUST be confirmed against these before S2.
+- **Reference indexer — READ at S1 (2026-11-17, read-only):**
+  `the-grid-agent-splash/locus-web/public/protocol/schemas/mint.json` +
+  `common.json`, and `locus-mobile/backend/locus_api/lib/locus_api/world/`
+  (`pin_chain_verifier.ex`, `pin_indexer.ex`, `pin.ex`, `world.ex`) plus
+  migration `20260504000100_create_open_world_v2.exs`. Verdict in §3.5.3:
+  schema/verifier pass coordinate-less mints, but pin persistence requires
+  coordinates and never stores `content` → Option B not indexed as designed.
+- **AIP provenance (S1):** original spec `iliad-masterkey/AUTHOR_IDENTITY_PROTOCOL`;
+  reference implementations `BitcoinFiles/bitcoinfiles-sdk` (`lib/utils.ts`),
+  `BitcoinSchema/go-aip`, `@1sat/templates@0.1.1` (`dist/bitcom/aip.js`);
+  BRC-0217 ordering convention (`https://bsv.brc.dev/tokens/0217`).
+  Byte rules validated against real mainnet tx
+  `5633bb966d9531d22df7ae98a70966eebe4379d400d74ac948bf5b4f2867092c`
+  (pinned in `testdata/message-vectors.json`).
 
 OSP: `https://github.com/futureman19/open-and-shut-protocol` (OSP-0001…0008);
 wallet OSP hardening commits `16af988`, `c5ff067`, `8963a00`; `src/osp.ts`,
 `src/osp-scope.ts`, `src/requests.ts`.
 
 This document is excluded from the npm package `files` list (unreviewed
-design). It authorizes no code, no broadcast, and no shared-protocol
-modification.
+design). S1 codec implementation was separately authorized by the owner
+("Start S1", 2026-11-17); this doc still authorizes no broadcast and no
+shared-protocol modification.
