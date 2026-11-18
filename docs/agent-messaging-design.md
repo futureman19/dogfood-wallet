@@ -1,8 +1,8 @@
 # Agent-to-Agent Messaging — v2 Design (Locus-native)
 
-**Status: S1–S4 IMPLEMENTED (2026-11-17); S5 IN PROGRESS — dust-safe
-546-sat tip + OP_FALSE OP_RETURN (006a) wire amendments landed 2026-11-18
-(§6.4), final funded attempt pending.** Implementation
+**Status: S1–S5 IMPLEMENTED — funded acceptance PASSED 2026-11-18
+(txid `e02893c9e4a7c169b113d243787eb7a30ee7adb24e8c23655d6ba491472b56da`,
+§6.4/§6.4a amendments, §12 S5).** Implementation
 progress is tracked per slice in §12; funded steps still require explicit
 authorization. This revises v1 (`964bd54`) after
 grounding in the actual Locus Protocol spec and reference implementation
@@ -675,7 +675,7 @@ raw-signing MCP tool. Grant signing stays off MCP entirely (unchanged).
 - **Best-effort delivery.** Poll-based; recipients must scan. No ordering, no
   read receipts, no censorship resistance beyond the chain itself.
 - **Not an OSP transition, not a payment rail.** Messages do not open doors,
-  do not settle x402, and move no value beyond the 1-sat tip + fee. They
+  do not settle x402, and move no value beyond the 546-sat tip + fee. They
   coordinate; the existing rails settle.
 - **Rate limits.** WoC polling is paced; heavy inbox use migrates to JungleBus
   / a Locus feed (§8).
@@ -749,14 +749,17 @@ authorization. Disposable vaults + intercepted network for all tests.
   receipt → on-chain verify on one shared intercepted chain. 34 new tests;
   full verify 1401/0; `verify:package` green. Zero broadcasts, no funding,
   no Locus/shared-protocol modification.
-- **S5 — Funded acceptance (authorized only). 🔄 IN PROGRESS 2026-11-18.**
-  One small message between two
-  disposable mainnet vaults; optionally a full grant-request round trip on a
-  test door. Verify tx on WoC, inbox receipt, signature, caps delta, and mined
-  status independently. First attempt rejected by ARC as dust (1-sat tip);
-  hold reconciled/cleared under owner authorization; dust-safe 546-sat tip
-  amendment landed under TDD (§6.4, full verify 1403/0). One fresh funded
-  attempt authorized; result recorded here when verified.
+- **S5 — Funded acceptance (authorized only). ✅ DONE 2026-11-18.**
+  One message between two disposable mainnet vaults, accepted on the third
+  authorized attempt after two ARC dust rejections (§6.4, §6.4a):
+  txid `e02893c9e4a7c169b113d243787eb7a30ee7adb24e8c23655d6ba491472b56da`,
+  546-sat tip + 828-sat fee (spend row 53, kind `agent-message`).
+  Independently verified: WoC mempool lookup (828 bytes); recipient-side
+  keyless inbox scan returned the exact body with `verified: true`
+  (envelope + AIP signatures over the 006a script), correct tip payee,
+  `transport: option-a`, `untrusted: true`. Block confirmation pending at
+  acceptance time (mempool). Grant-request round trip on a test door was
+  NOT exercised (optional; not authorized beyond the single message).
 
 Gate for every slice: `bun run verify` green (full tests + typecheck) before
 commit. This design doc is intentionally NOT added to `package.json` `files`
