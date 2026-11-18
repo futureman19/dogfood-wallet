@@ -305,7 +305,7 @@ describe("sendAgentMessage funding and tx shape (intercepted transport)", () => 
       // out1: 0-sat OP_RETURN B|MAP|AIP message, AIP signer = vault
       expect(tx.outputs[1]!.satoshis).toBe(0);
       const scriptHex = tx.outputs[1]!.lockingScript.toHex();
-      expect(scriptHex.startsWith("6a")).toBe(true);
+      expect(scriptHex.startsWith("006a")).toBe(true);
       const verified = verifyMessageScript(scriptHex);
       expect(verified.aipAddress).toBe(v.address);
       expect(verified.envelope.from).toBe(v.address);

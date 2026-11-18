@@ -285,7 +285,7 @@ describe("Option A — BitCom B|MAP|AIP script", () => {
 
   test("build → parse → verify roundtrip", () => {
     const script = buildMessageScript(ONE, baseEnv());
-    expect(script.startsWith("6a")).toBe(true); // bare OP_RETURN per design §6.2
+    expect(script.startsWith("006a")).toBe(true); // OP_FALSE OP_RETURN per design §6.2 (amended: post-Genesis nodes exempt only 006a from dust)
     const parsed = parseMessageScript(script);
     expect(parsed.aipAddress).toBe(ADDR_ONE);
     expect(parsed.envelope.from).toBe(ADDR_ONE);
@@ -348,9 +348,11 @@ describe("Option A — BitCom B|MAP|AIP script", () => {
     expect(verifyMessageScript(rebuilt).pubkey).toBe(ONE.toPublicKey().toString());
   });
 
-  test("OP_FALSE OP_RETURN prefix variant parses (Locus-style interop)", () => {
+  test("bare OP_RETURN prefix variant parses (historical interop)", () => {
     const script = buildMessageScript(ONE, baseEnv());
-    expect(verifyMessageScript("00" + script).envelope.from).toBe(ADDR_ONE);
+    expect(script.startsWith("006a")).toBe(true);
+    // pre-Genesis / historical bare-6a scripts must still verify
+    expect(verifyMessageScript(script.slice(2)).envelope.from).toBe(ADDR_ONE);
   });
 
   test("tampered envelope push fails AIP verification", () => {

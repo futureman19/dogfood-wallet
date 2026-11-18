@@ -386,9 +386,13 @@ export function verifyAipSection(scriptHex: string): { address: string; pubkey: 
 
 // ---- Option A: BitCom B|MAP|AIP ----
 
-/** Build the Option A message OP_RETURN script (bare 6a per design §6.2).
- * The envelope is embedded WITHOUT sig — the AIP signature is the authorship
- * proof over the whole preimage (which includes the envelope bytes). */
+/** Build the Option A message OP_RETURN script (OP_FALSE OP_RETURN / 006a
+ * per design §6.2, amended 2026-11-18: post-Genesis BSV nodes treat bare 6a
+ * 0-sat outputs as spendable dust and ARC peers reject them; only 006a is
+ * provably unspendable. The AIP preimage stays 0x6a-based, so signatures are
+ * prefix-independent). The envelope is embedded WITHOUT sig — the AIP
+ * signature is the authorship proof over the whole preimage (which includes
+ * the envelope bytes). */
 export function buildMessageScript(key: PrivateKey, env: unknown): string {
   const e = validateEnvelope(env, "forbidden");
   if (key.toAddress() !== e.from) fail("from must equal the signing key's address");
@@ -401,7 +405,7 @@ export function buildMessageScript(key: PrivateKey, env: unknown): string {
   const sigB64 = BSM.sign(Array.from(aipPreimage(left)), key, "base64") as string;
   const sigRaw = Buffer.from(sigB64, "base64");
   const aipSection = [utf8(AIP_PREFIX), utf8(AIP_ALGORITHM), utf8(e.from as string), sigRaw];
-  return encodeScript("6a", [...left, ...aipSection]);
+  return encodeScript("006a", [...left, ...aipSection]);
 }
 
 const MESSAGE_PUSH_COUNT = 18; // B(4) + | + MAP(8) + | + AIP(4)

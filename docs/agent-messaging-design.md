@@ -1,7 +1,8 @@
 # Agent-to-Agent Messaging — v2 Design (Locus-native)
 
 **Status: S1–S4 IMPLEMENTED (2026-11-17); S5 IN PROGRESS — dust-safe
-546-sat tip amendment landed 2026-11-18 (§6.4), funded attempt pending.** Implementation
+546-sat tip + OP_FALSE OP_RETURN (006a) wire amendments landed 2026-11-18
+(§6.4), final funded attempt pending.** Implementation
 progress is tracked per slice in §12; funded steps still require explicit
 authorization. This revises v1 (`964bd54`) after
 grounding in the actual Locus Protocol spec and reference implementation
@@ -325,12 +326,12 @@ JSON; the signature covers the envelope **excluding** `sig`:
 
 ### 5.3 Option A — BitCom B | MAP | AIP layout (active transport since S1)
 
-One OP_RETURN (bare `6a` per §6.2), chained per BitCom so ecosystem indexers
-(JungleBus, 1Sat tooling) parse and verify natively. Exactly **18 pushes**,
-pipes included, no empty pushes:
+One OP_FALSE OP_RETURN (`006a` per §6.2, amended §6.4a), chained per BitCom
+so ecosystem indexers (JungleBus, 1Sat tooling) parse and verify natively.
+Exactly **18 pushes**, pipes included, no empty pushes:
 
 ```
-OP_RETURN
+OP_FALSE OP_RETURN
   | B_PREFIX                              (19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut)
   | <envelope>                            (UTF-8 canonical JSON, §5.2, single push, no sig)
   | "application/json"
@@ -428,7 +429,8 @@ Mirrors `buildMintTx` (`transaction-builder.ts:970`): ordinal tip
 inputs:  root-vault coins, smallest-first
 out 0:   546 sats → recipient vault address (canonical P2PKH) [notification;
          dust-safe per S5 amendment §6.4 — was 1 sat in v1/v2 pre-S5]
-out 1:   0 sats → OP_RETURN (B | MAP | AIP, §5.3)             [message]
+out 1:   0 sats → OP_FALSE OP_RETURN (B | MAP | AIP, §5.3)    [message;
+         006a per S5 amendment §6.4a — bare 6a is mempool-dust post-Genesis]
 out 2:   change → sender vault address (kept only if ≥ 546 sats;
          sub-dust change folds into the fee)
 ```
@@ -478,6 +480,37 @@ Amendment (owner-authorized, TDD, intercepted transport first):
 - Follow-up noted, out of S5 scope: `src/send.ts` and `src/allowance.ts`
   still use the pre-dust `change > 1` / 1-sat conventions on their own
   rails; audit them against ARC dust policy separately.
+
+### 6.4a S5 live amendment 2 (2026-11-18): OP_FALSE OP_RETURN (006a) wire
+
+The second funded attempt (546-sat tip, txid
+`fe8a8c1280c0ebf692f5373d6ace1bea0665dba5ddaa04ab58ecb95a19818795`,
+evidence `a220ca82-b9a8-437e-8bc9-1dea99613d13`) was **also
+rejected `reason=dust`** even though every output was dust-safe on paper.
+Root cause, proven from the Bitcoin SV node source
+(`src/script/script.h`, v1.0.10 and master): post-Genesis,
+`IsUnspendable()` recognizes **only `OP_FALSE OP_RETURN` (`006a`)** as
+provably unspendable — Genesis restored OP_RETURN functionality, so a bare
+`6a` script is treated as spendable and its 0-sat output is dust
+(`IsDust`: value < 1 sat on current nodes). The S1 codec emitted bare `6a`
+(design §6.2 v1 choice), so the data output was mempool-rejected regardless
+of tip size. Corroboration: the repo's OSP envelope builder already writes
+`006a` (`src/osp-envelope.ts`), and OSP door/grant broadcasts from this
+vault have settled through the same ARC peer.
+
+Amendment (owner-authorized, TDD, intercepted transport first):
+
+- `buildMessageScript` emits `006a`; golden vectors re-pinned
+  (`optionA.scriptHex`, `grantRequest.scriptHex` — prefix byte only).
+- **AIP preimage and signatures are unchanged** (preimage stays `0x6a` ||
+  push contents; the OP_FALSE prefix is a container detail, matching the
+  ecosystem strip-OP_FALSE convention). Envelope signatures stay valid.
+- Parser keeps accepting bare `6a` for historical interop (the real-chain
+  AIP anchor `5633bb96…092c` is bare `6a`); a dedicated test pins that.
+- Safe wire change: no live message has ever landed and the package is
+  unpublished, so no deployed reader depends on the old shape.
+- Option B's Locus mint script is built by the Locus rail, not this codec;
+  its prefix must be audited when Option B becomes viable (indexer-blocked).
 
 ## 7. Message types
 

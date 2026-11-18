@@ -80,7 +80,7 @@ function badAipScript(env: TestEnv): string {
   const { pushes } = parseMessageScript(good);
   const pre = aipPreimage(pushes.slice(0, 14));
   const sig = Buffer.from(BSM.sign(Array.from(pre), THREE, "base64") as string, "base64");
-  return encodePushes("6a", [...pushes.slice(0, 17), sig]);
+  return encodePushes("006a", [...pushes.slice(0, 17), sig]);
 }
 
 /** Message tx: out0 = 546-sat dust-safe tip to recipient, out1 = message, out2 = change to sender. */
