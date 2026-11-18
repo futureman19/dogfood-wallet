@@ -30,6 +30,13 @@ export const MESSAGE_V = 1;
 export const MAX_BODY_BYTES = 4096;
 export const MAX_REASON_BYTES = 280;
 
+// S5 live acceptance (2026-11-18): GorillaPool ARC rejects outputs below
+// 546 sats as dust (peer policy; cf. bitcoin-sv node issue #35). The inbox
+// notification tip and the minimum kept change are therefore 546 sats.
+// Option B Locus pins stay 1 sat by protocol (deferred transport).
+export const DUST_LIMIT_SATS = 546;
+export const MESSAGE_TIP_SATS = DUST_LIMIT_SATS;
+
 // BitCom protocol prefixes (bsv-standards references/bitcom-protocols.md).
 export const B_PREFIX = "19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut";
 export const MAP_PREFIX = "1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5";

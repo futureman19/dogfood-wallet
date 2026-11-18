@@ -1,6 +1,6 @@
 // Inbox-tip exclusion store (agent messaging S2).
 //
-// A message pays its recipient a 1-sat "inbox tip" outpoint. Those outpoints
+// A message pays its recipient a 546-sat dust-safe "inbox tip" outpoint. Those outpoints
 // are address-visible money the recipient owns, but the SENDER must never
 // re-select its own previously paid tips as funding (they belong to the
 // recipient's inbox semantics, and re-spending them would double-count the

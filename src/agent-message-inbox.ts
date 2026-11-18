@@ -5,7 +5,7 @@
 //     The inbox address comes from address.txt (public) or the caller.
 //   - WoC address history is the only chain source; every fetch is injectable
 //     and paced under the 3 req/s public limit.
-//   - A message is surfaced only when a 1-sat P2PKH tip pays envelope.to AND
+//   - A message is surfaced only when a 546-sat P2PKH tip pays envelope.to AND
 //     that payee is the scanned address. Sent messages (change-only visibility)
 //     never pollute the sender's own inbox.
 //   - Signature failures are surfaced verified:false — never silently dropped,
@@ -21,7 +21,7 @@ import { existsSync, openSync, fsyncSync, closeSync, writeFileSync, renameSync, 
 import { PublicKey, Transaction, Utils } from "@bsv/sdk";
 import {
   parseMessageScript, verifyMessageScript, parseLocusMessagePayload, strictMainnetAddress,
-  MESSAGE_SUBTYPE, LOCUS_P, LOCUS_V, type Envelope,
+  MESSAGE_SUBTYPE, MESSAGE_TIP_SATS, LOCUS_P, LOCUS_V, type Envelope,
 } from "./agent-message";
 import { sourceTransaction } from "./gryd-buy";
 import { vaultPaths } from "./vault";
@@ -162,10 +162,10 @@ function classifyMessageTx(tx: Transaction): Classified | { none: true; reason: 
   if (found.length > 1) return { none: true, reason: "ambiguous: multiple agent-message outputs in one transaction" };
   const m = found[0]!;
   const to = typeof m.envelope.to === "string" ? m.envelope.to : undefined;
-  // 1-sat P2PKH tip outputs; the payee must equal envelope.to.
+  // 546-sat dust-safe P2PKH tip outputs; the payee must equal envelope.to.
   const tips: { address: string; vout: number }[] = [];
   tx.outputs.forEach((out, vout) => {
-    if (out.satoshis !== 1) return;
+    if (out.satoshis !== MESSAGE_TIP_SATS) return;
     const address = p2pkhAddress(out.lockingScript?.toHex() ?? "");
     if (address) tips.push({ address, vout });
   });

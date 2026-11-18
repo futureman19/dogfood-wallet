@@ -83,7 +83,7 @@ function badAipScript(env: TestEnv): string {
   return encodePushes("6a", [...pushes.slice(0, 17), sig]);
 }
 
-/** Message tx: out0 = 1-sat tip to recipient, out1 = message, out2 = change to sender. */
+/** Message tx: out0 = 546-sat dust-safe tip to recipient, out1 = message, out2 = change to sender. */
 function messageTx(opts: {
   sender?: PrivateKey; env?: Partial<TestEnv>; transport?: "option-a" | "option-b";
   tipTo?: string; badAip?: boolean;
@@ -101,7 +101,7 @@ function messageTx(opts: {
     scriptHex = locusScript(payload);
   }
   return unsignedTx([
-    { satoshis: 1, lockingScript: new P2PKH().lock(tipTo) },
+    { satoshis: 546, lockingScript: new P2PKH().lock(tipTo) },
     { satoshis: 0, lockingScript: Script.fromHex(scriptHex) },
     { satoshis: 1000, lockingScript: new P2PKH().lock(sender.toAddress()) },
   ]);

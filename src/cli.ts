@@ -47,7 +47,7 @@ const HELP = `Dogfood Wallet — local BSV agent vault (mainnet)
   bun src/cli.ts agent-register <mint-txid> <name> <lat> <lng> [--no-post]
   bun src/cli.ts agent-list <ordinal-outpoint> <price-sats> [--no-broadcast]
   bun src/cli.ts agent-cancel-listing <listing-outpoint> [--no-broadcast]
-  bun src/cli.ts agent-message <to-address> <body> [--type T] [--json]  # guarded 1-sat inbox message
+  bun src/cli.ts agent-message <to-address> <body> [--type T] [--json]  # guarded 546-sat inbox message
   bun src/cli.ts messages [--address A] [--from A] [--type T] [--limit N] [--json]  # read-only inbox scan
   bun src/cli.ts fund-request <sats>
   bun src/cli.ts osp address                                # this vault's OSP door-owner identity
@@ -580,7 +580,7 @@ async function main() {
       if (json) console.log(JSON.stringify(result, null, 2));
       else {
         console.log(`txid: ${result.txid}`);
-        console.log(`message: 1 sat tip to ${result.to} (fee ${result.fee}, nonce ${result.nonce})`);
+        console.log(`message: ${result.tip} sat tip to ${result.to} (fee ${result.fee}, nonce ${result.nonce})`);
       }
       break;
     }

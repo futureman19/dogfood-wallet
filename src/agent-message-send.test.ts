@@ -278,7 +278,7 @@ describe("sendAgentMessage funding and tx shape (intercepted transport)", () => 
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("happy path: 1-sat tip, verified OP_RETURN, change, log, evidence, hold cleared", async () => {
+  test("happy path: 546-sat tip, verified OP_RETURN, change, log, evidence, hold cleared", async () => {
     const root = scratch();
     try {
       initVault(root);
@@ -291,15 +291,16 @@ describe("sendAgentMessage funding and tx shape (intercepted transport)", () => 
       if (!r.ok) return;
       const expectedTxid = Transaction.fromHex(cap.sent[0]!).id("hex");
       expect(r.txid).toBe(expectedTxid);
-      expect(r.tip).toBe(1);
+      expect(r.tip).toBe(546);
       expect(r.nonce).toBe(NONCE);
       expect(cap.sent.length).toBe(1);
 
       const tx = Transaction.fromHex(cap.sent[0]!);
       expect(tx.inputs.length).toBe(1);
       expect(tx.outputs.length).toBe(3);
-      // out0: 1-sat P2PKH tip to the recipient inbox
-      expect(tx.outputs[0]!.satoshis).toBe(1);
+      // out0: 546-sat P2PKH tip to the recipient inbox (dust-safe: S5 live
+      // acceptance proved GorillaPool ARC rejects sub-546 outputs as dust)
+      expect(tx.outputs[0]!.satoshis).toBe(546);
       expect(tx.outputs[0]!.lockingScript.toHex()).toBe(new P2PKH().lock(TO).toHex());
       // out1: 0-sat OP_RETURN B|MAP|AIP message, AIP signer = vault
       expect(tx.outputs[1]!.satoshis).toBe(0);
@@ -315,19 +316,19 @@ describe("sendAgentMessage funding and tx shape (intercepted transport)", () => 
       expect(verified.envelope.ts).toBe(TS);
       // out2: change back to the vault
       const change = tx.outputs[2]!.satoshis!;
-      expect(change).toBeGreaterThan(1);
+      expect(change).toBeGreaterThanOrEqual(546);
       expect(tx.outputs[2]!.lockingScript.toHex()).toBe(new P2PKH().lock(v.address).toHex());
       // fee accounting: everything leaving the vault is tip + fee
-      expect(r.fee).toBe(COIN.value - 1 - change);
+      expect(r.fee).toBe(COIN.value - 546 - change);
       expect(cap.sent[0]!.length / 2).toBeLessThanOrEqual(r.fee); // >= 1 sat/byte
 
       // durable usage row feeds the messages scope fee-inclusive
       const lines = readFileSync(vaultPaths(root).log, "utf8").split(/\r?\n/);
       const u = usageFromLog(lines, new Date(TS * 1000), "messages");
-      expect(u.spentToday).toBe(1 + r.fee);
+      expect(u.spentToday).toBe(546 + r.fee);
       const row = JSON.parse(lines.find((l) => l.includes("agent-message"))!);
       expect(row.kind).toBe("agent-message");
-      expect(row.amount).toBe(1);
+      expect(row.amount).toBe(546);
       expect(row.to).toBe(TO);
       expect(row.txid).toBe(expectedTxid);
 
@@ -345,7 +346,7 @@ describe("sendAgentMessage funding and tx shape (intercepted transport)", () => 
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("dust change folds into the fee (two outputs)", async () => {
+  test("sub-dust change folds into the fee (two outputs)", async () => {
     const root = scratch();
     try {
       initVault(root);
@@ -354,14 +355,57 @@ describe("sendAgentMessage funding and tx shape (intercepted transport)", () => 
       const env = { v: 1, app: "dogfood", type: "message", from: v.address, to: TO, nonce: NONCE, ts: TS, body: "hi" };
       const scriptBytes = buildMessageScript(v.key, env).length / 2;
       const plannedFee = 10 + 148 + 68 + scriptBytes + 8; // one input, fee model pinned
-      const f = funding(root, plannedFee + 2); // change would be 1 sat -> folded
+      const f = funding(root, plannedFee + 546 + 2); // change would be 1 sat -> folded (< 546)
       const cap = intercepted();
       const r = await sendAgentMessage({ root, to: TO, body: "hi", nonce: NONCE, ts: TS, now: NOW, fetchUtxos: f.fetchUtxos, fetchTxHex: f.fetchTxHex, broadcast: cap.broadcast });
       expect(r.ok).toBe(true);
       if (!r.ok) return;
       const tx = Transaction.fromHex(cap.sent[0]!);
       expect(tx.outputs.length).toBe(2);
-      expect(r.fee).toBe(f.coin.value - 1);
+      expect(r.fee).toBe(f.coin.value - 546);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("change of exactly 546 sats is kept (dust-safe boundary)", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      enableMessages(root);
+      const v = loadVault(root);
+      const env = { v: 1, app: "dogfood", type: "message", from: v.address, to: TO, nonce: NONCE, ts: TS, body: "hi" };
+      const scriptBytes = buildMessageScript(v.key, env).length / 2;
+      const scriptLenBytes = scriptBytes < 253 ? 1 : scriptBytes <= 0xffff ? 3 : 5;
+      const feeWithChange = 10 + 148 + 34 + (8 + scriptLenBytes + scriptBytes) + 34;
+      const f = funding(root, 546 + feeWithChange + 546); // rest is exactly 546 -> kept
+      const cap = intercepted();
+      const r = await sendAgentMessage({ root, to: TO, body: "hi", nonce: NONCE, ts: TS, now: NOW, fetchUtxos: f.fetchUtxos, fetchTxHex: f.fetchTxHex, broadcast: cap.broadcast });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      const tx = Transaction.fromHex(cap.sent[0]!);
+      expect(tx.outputs.length).toBe(3);
+      expect(tx.outputs[2]!.satoshis).toBe(546);
+      expect(r.fee).toBe(feeWithChange);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("change of 545 sats folds into the fee (sub-dust boundary)", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      enableMessages(root);
+      const v = loadVault(root);
+      const env = { v: 1, app: "dogfood", type: "message", from: v.address, to: TO, nonce: NONCE, ts: TS, body: "hi" };
+      const scriptBytes = buildMessageScript(v.key, env).length / 2;
+      const scriptLenBytes = scriptBytes < 253 ? 1 : scriptBytes <= 0xffff ? 3 : 5;
+      const feeWithChange = 10 + 148 + 34 + (8 + scriptLenBytes + scriptBytes) + 34;
+      const f = funding(root, 546 + feeWithChange + 545); // rest is 545 -> folded
+      const cap = intercepted();
+      const r = await sendAgentMessage({ root, to: TO, body: "hi", nonce: NONCE, ts: TS, now: NOW, fetchUtxos: f.fetchUtxos, fetchTxHex: f.fetchTxHex, broadcast: cap.broadcast });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      const tx = Transaction.fromHex(cap.sent[0]!);
+      expect(tx.outputs.length).toBe(2);
+      expect(r.fee).toBe(f.coin.value - 546);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
@@ -436,7 +480,7 @@ describe("sendAgentMessage failure discipline", () => {
       const hold = inspectPaymentHold(root);
       expect(hold.blocked).toBe(true);
       expect(hold.pending).toBe("valid");
-      expect(hold.intent?.amount).toBe(1);
+      expect(hold.intent?.amount).toBe(546);
       const dir = vaultPaths(root).messages;
       const files = require("node:fs").readdirSync(dir) as string[];
       expect(files.length).toBe(1);

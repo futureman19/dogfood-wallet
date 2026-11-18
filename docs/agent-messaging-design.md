@@ -1,6 +1,7 @@
 # Agent-to-Agent Messaging — v2 Design (Locus-native)
 
-**Status: S1–S4 IMPLEMENTED (2026-11-17); S5 pending.** Implementation
+**Status: S1–S4 IMPLEMENTED (2026-11-17); S5 IN PROGRESS — dust-safe
+546-sat tip amendment landed 2026-11-18 (§6.4), funded attempt pending.** Implementation
 progress is tracked per slice in §12; funded steps still require explicit
 authorization. This revises v1 (`964bd54`) after
 grounding in the actual Locus Protocol spec and reference implementation
@@ -400,8 +401,8 @@ signing time** — not real-world identity, honesty, or truth of the body.
 ### 5.5 Size and cost
 
 Keep the envelope body ≤ `maxBodyBytes` (default 4 KB). A small message tx
-is roughly 300–500 bytes → ~300–500 sats at recent fee rates, plus the 1-sat
-tip. Caps and accounting are fee-inclusive. Messages are short coordination
+is roughly 300–500 bytes → ~300–500 sats at recent fee rates, plus the
+546-sat dust-safe tip (S5 amendment, §6.4). Caps and accounting are fee-inclusive. Messages are short coordination
 artifacts, not file transfer; `content_uri` can point at larger off-chain
 content if ever needed (out of scope for v1).
 
@@ -425,15 +426,19 @@ Mirrors `buildMintTx` (`transaction-builder.ts:970`): ordinal tip
 
 ```
 inputs:  root-vault coins, smallest-first
-out 0:   1 sat  → recipient vault address (canonical P2PKH)   [notification]
+out 0:   546 sats → recipient vault address (canonical P2PKH) [notification;
+         dust-safe per S5 amendment §6.4 — was 1 sat in v1/v2 pre-S5]
 out 1:   0 sats → OP_RETURN (B | MAP | AIP, §5.3)             [message]
-out 2:   change → sender vault address
+out 2:   change → sender vault address (kept only if ≥ 546 sats;
+         sub-dust change folds into the fee)
 ```
 
 ### 6.3 Ambiguity hygiene (both options, OSP-0001 lesson)
 
-- The tip/notification is **exactly 1 sat** to a canonical P2PKH script
-  distinct from change; change rides the **sender** address, never the tip.
+- The tip/notification is **exactly 546 sats** (Option A, dust-safe per
+  §6.4; Option B Locus pins stay 1 sat by protocol) to a canonical P2PKH
+  script distinct from change; change rides the **sender** address, never
+  the tip.
 - A message tx is **not an OSP transition**: it carries no OSP envelope
   output and must never be parsed as one. Door tip-liveness scans look for
   exactly-one-envelope; Locus JSON / B|MAP|AIP pushes are not OSP envelopes,
@@ -442,7 +447,37 @@ out 2:   change → sender vault address
 - The OSP-0005 wallet payment subset rejects OP_RETURN/envelope-like payment
   scripts; unchanged. Messages are their own operation kind, not a payment
   workaround.
-- BSV has no dust limit; 1-sat outputs are standard 1Sat-ecosystem practice.
+- BSV consensus has no dust limit, but **ARC peer policy does**: GorillaPool
+  ARC rejects outputs below 546 sats as dust (proven live at S5, §6.4).
+  1-sat outputs remain standard for 1Sat-ecosystem ordinal tips that ARC
+  accepts via its ordinal paths; agent-message notification tips ride the
+  standard payment path and must be ≥ 546 sats.
+
+### 6.4 S5 live amendment (2026-11-18): dust-safe 546-sat tips
+
+The first funded S5 attempt (txid
+`c1773b72ab25d8122f4cb83be04d06d10aa8965e215171a96e68556f30a3f355`) was
+**rejected by GorillaPool ARC with `reason=dust`**: the 1-sat inbox tip is
+below the peer's 546-sat dust threshold. The signed tx never settled (input
+unspent, no spend row, balance unchanged); the conservative hold was
+reconciled and cleared under explicit owner authorization, with the full
+record preserved in the message evidence file (`reconciled-rejected`).
+
+Amendment (owner-authorized, TDD, intercepted transport first):
+
+- `MESSAGE_TIP_SATS = DUST_LIMIT_SATS = 546` in `src/agent-message.ts`;
+  the send rail tip and the inbox scanner tip filter both use it.
+- Change is kept only when ≥ 546 sats; sub-dust change folds into the fee
+  (boundary tests pin 545-fold / 546-keep).
+- **Unchanged:** Option B Locus pins (1 sat by Locus protocol, deferred
+  transport) and OSP door tips (1 sat by OSP protocol). The Locus
+  agent-pin binding check (`satoshis === 1`) is pin semantics, not the
+  message tip, and stays.
+- Cost per message rises by 545 sats (~1,373 sats total for a small body
+  at 1 sat/byte); caps/accounting stay fee-inclusive.
+- Follow-up noted, out of S5 scope: `src/send.ts` and `src/allowance.ts`
+  still use the pre-dust `change > 1` / 1-sat conventions on their own
+  rails; audit them against ARC dust policy separately.
 
 ## 7. Message types
 
@@ -641,7 +676,8 @@ authorization. Disposable vaults + intercepted network for all tests.
 - **S3 — Inbox. ✅ DONE 2026-11-17.** `src/agent-message-inbox.ts`: keyless,
   read-only WoC scan (`confirmed/history` asc from high-water+1, plus
   `unconfirmed/history`, ≥350 ms pacing under the 3 req/s limit), strict
-  Option A/B classification, 1-sat P2PKH tip-payee inbox filter (sent
+  Option A/B classification, 546-sat dust-safe P2PKH tip-payee inbox filter
+  (S5 amendment §6.4; sent
   messages never pollute the sender's inbox), agent-pin binding (pin owner
   pubkey must equal the verified authorship key; unverified messages never
   bind), fail-closed `inbox.json` store (dedupe by txid + confirmed-height
@@ -680,10 +716,14 @@ authorization. Disposable vaults + intercepted network for all tests.
   receipt → on-chain verify on one shared intercepted chain. 34 new tests;
   full verify 1401/0; `verify:package` green. Zero broadcasts, no funding,
   no Locus/shared-protocol modification.
-- **S5 — Funded acceptance (authorized only).** One small message between two
+- **S5 — Funded acceptance (authorized only). 🔄 IN PROGRESS 2026-11-18.**
+  One small message between two
   disposable mainnet vaults; optionally a full grant-request round trip on a
   test door. Verify tx on WoC, inbox receipt, signature, caps delta, and mined
-  status independently.
+  status independently. First attempt rejected by ARC as dust (1-sat tip);
+  hold reconciled/cleared under owner authorization; dust-safe 546-sat tip
+  amendment landed under TDD (§6.4, full verify 1403/0). One fresh funded
+  attempt authorized; result recorded here when verified.
 
 Gate for every slice: `bun run verify` green (full tests + typecheck) before
 commit. This design doc is intentionally NOT added to `package.json` `files`

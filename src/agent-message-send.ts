@@ -2,7 +2,7 @@
 //
 // Wires the S1 codec (agent-message.ts) into the SAME payment guard, policy
 // engine, BRC-181 gate, and source-verification machinery as every other
-// spend. A message is a BSV transaction: 1-sat inbox tip to the recipient,
+// spend. A message is a BSV transaction: 546-sat inbox tip to the recipient,
 // one OP_RETURN carrying the BitCom B|MAP|AIP envelope, optional change.
 //
 // S4: plain `message` plus OSP typed bodies osp.grant.request /
@@ -22,7 +22,7 @@
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { P2PKH, Script, Transaction } from "@bsv/sdk";
-import { buildMessageScript, randomNonce, signEnvelope, type Envelope } from "./agent-message";
+import { buildMessageScript, randomNonce, signEnvelope, MESSAGE_TIP_SATS, DUST_LIMIT_SATS, type Envelope } from "./agent-message";
 import { gateAgentSend, loadPolicyEnvelope } from "./brc181";
 import { excludeInboxTips, loadInboxTips, markInboxTip } from "./inbox-tips";
 import { inspectPaymentHold, PaymentHeldError, withPaymentGuard } from "./payment-guard";
@@ -31,10 +31,10 @@ import { parseGrantRequestBody, parseGrantReceiptBody } from "./agent-message-os
 import { defaultBroadcast, defaultFetchTxHex, defaultFetchUtxos, type Utxo } from "./send";
 import { loadUsage, loadVault, vaultPaths } from "./vault";
 
-const TIP_SATS = 1;
+const TIP_SATS = MESSAGE_TIP_SATS;
 
 export type AgentMessageSendResult =
-  | { ok: true; txid: string; to: string; tip: 1; fee: number; nonce: string; guardId: string; evidence: string }
+  | { ok: true; txid: string; to: string; tip: typeof MESSAGE_TIP_SATS; fee: number; nonce: string; guardId: string; evidence: string }
   | { ok: false; code: string; message: string };
 
 export type AgentMessageSendOptions = {
@@ -168,8 +168,9 @@ export async function sendAgentMessage(opts: AgentMessageSendOptions): Promise<A
 
     // Coin selection with the message fee model: outputs are tip (34 bytes),
     // OP_RETURN (scriptBytes + CompactSize length + 8), and optional change
-    // (34). Dust change <= 1 sat folds into the fee; change that cannot afford
-    // its own output also folds (same convention as send.ts).
+    // (34). Sub-dust change (< 546 sats) folds into the fee — ARC peers
+    // reject dust outputs (S5 live finding); change that cannot afford its
+    // own output also folds.
     const scriptLenBytes = scriptBytes < 253 ? 1 : scriptBytes <= 0xffff ? 3 : 5;
     const opReturnOutBytes = 8 + scriptLenBytes + scriptBytes;
     const sorted = [...utxos].sort((a, b) => a.value - b.value);
@@ -183,7 +184,7 @@ export async function sendAgentMessage(opts: AgentMessageSendOptions): Promise<A
       const feeWithChange = 10 + 148 * chosen.length + 34 + opReturnOutBytes + 34;
       if (total >= TIP_SATS + feeWithChange) {
         const rest = total - TIP_SATS - feeWithChange;
-        if (rest > 1) {
+        if (rest >= DUST_LIMIT_SATS) {
           plannedFee = feeWithChange;
           change = rest;
         } else {
@@ -277,7 +278,7 @@ export async function sendAgentMessage(opts: AgentMessageSendOptions): Promise<A
 
     guard.log({ kind: "agent-message", t: new Date(now()).toISOString(), txid: result.txid, to: opts.to, amount: TIP_SATS, fee: plannedFee, nonce, note: "" });
     writeEvidence(evidencePath, { ...evidence, status: "broadcast", txid: result.txid });
-    // The 1-sat tip outpoint is now excluded from this vault's future coin
+    // The 546-sat tip outpoint is now excluded from this vault's future coin
     // selection (it belongs to the recipient's inbox semantics).
     markInboxTip(root, `${result.txid}.0`);
 

@@ -127,6 +127,8 @@ function ospVault(root: string) {
       state.broadcasts.push(tx);
       state.tip = null;
       tx.outputs.forEach((o, i) => {
+        // OSP door tip: 1 sat by OSP protocol (distinct from the 546-sat
+        // dust-safe agent-message inbox tip).
         if (o.satoshis === 1 && o.lockingScript.toHex() === tipScript) state.tip = { txid, vout: i };
       });
       return Response.json({ txid, txStatus: "SEEN_ON_NETWORK" });
