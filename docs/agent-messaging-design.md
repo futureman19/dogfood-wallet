@@ -1,6 +1,6 @@
 # Agent-to-Agent Messaging — v2 Design (Locus-native)
 
-**Status: S1–S3 IMPLEMENTED (2026-11-17); S4–S5 pending.** Implementation
+**Status: S1–S4 IMPLEMENTED (2026-11-17); S5 pending.** Implementation
 progress is tracked per slice in §12; funded steps still require explicit
 authorization. This revises v1 (`964bd54`) after
 grounding in the actual Locus Protocol spec and reference implementation
@@ -656,10 +656,30 @@ authorization. Disposable vaults + intercepted network for all tests.
   no funding, no vault decryption. Live-verified read-only: full history
   scan of the vault address (high-water 975782) and a zero-refetch
   incremental rescan; WoC's 404-on-empty-page quirk handled fail-safe.
-- **S4 — OSP typed messages.** `osp.grant.request` / `osp.grant.receipt`
-  bodies, validation parity with `requests.ts`, cross-agent flow tests
-  (message → file → approve → grant → receipt → on-chain verify) with
-  intercepted chain.
+- **S4 — OSP typed messages. ✅ DONE 2026-11-17.** `src/agent-message-osp.ts`:
+  keyless parse/match/verify for `osp.grant.request` / `osp.grant.receipt`.
+  The wire format is the S1 codec's pinned contract (typed bodies are JSON
+  objects: request `{scope, doorGenesisTxid, doorOwnerAddress, reason,
+  sessionPubHex}` + optional `{expiryHeight, maxEgressBytes}`; receipt
+  exactly `{grantTxid, scopeHash, doorGenesisTxid}`) — no new format.
+  Filing-parity validation (canonical JCS scope + salt, wallet P2PKH payment
+  restriction, bounds, reason rules, compressed 02/03 session pubkey) runs
+  BEFORE any key or chain access; where the codec is looser than filing
+  (e.g. `expiryHeight` 0), the filing rule wins — anything parseable is
+  filable. Scope travels byte-pinned (`scope` → `scopeCanonical`, never
+  rewritten); filing stays explicit (`grantRequestToFilingInput` maps, never
+  auto-files); `matchDoor` binds against the filing agent's OWN registry.
+  Receipts are pointers: `verifyGrantReceipt` fetches the grant tx and checks
+  the actual OSP envelope (push-header parsed directly; SDK chunk views fold
+  PUSHDATA bytes into OP_RETURN data), scopeHash reproduction from the exact
+  scope bytes, door-genesis binding, and paid-scope payment-output presence.
+  Guarded send accepts the two typed types (object or JSON-text body);
+  unknown types still `BAD_TYPE`, invalid typed bodies `BAD_BODY` pre-fetch.
+  MCP `agent_message` gains optional `type`; CLI `--type` already passed
+  through. Cross-agent flow test: message → inbox → file → approve → grant →
+  receipt → on-chain verify on one shared intercepted chain. 34 new tests;
+  full verify 1401/0; `verify:package` green. Zero broadcasts, no funding,
+  no Locus/shared-protocol modification.
 - **S5 — Funded acceptance (authorized only).** One small message between two
   disposable mainnet vaults; optionally a full grant-request round trip on a
   test door. Verify tx on WoC, inbox receipt, signature, caps delta, and mined

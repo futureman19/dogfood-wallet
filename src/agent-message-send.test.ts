@@ -157,15 +157,23 @@ describe("sendAgentMessage policy gate (no fetch before rejection)", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("S2 accepts only type 'message'", async () => {
+  test("type gate: unknown types BAD_TYPE; S4 typed types pass the gate but demand valid bodies", async () => {
     const root = scratch();
     try {
       initVault(root);
       enableMessages(root);
-      const r = await sendAgentMessage({ root, to: TO, body: "hi", type: "osp.grant.request", fetchUtxos: async () => [] });
-      expect(r.ok).toBe(false);
-      if (r.ok) return;
-      expect(r.code).toBe("BAD_TYPE");
+      const unknown = await sendAgentMessage({ root, to: TO, body: "hi", type: "osp.grant.bogus", fetchUtxos: async () => [] });
+      expect(unknown.ok).toBe(false);
+      if (unknown.ok) return;
+      expect(unknown.code).toBe("BAD_TYPE");
+      // S4: osp.grant.request is an allowed type now — a plain-text body is
+      // BAD_BODY (filing parity), not BAD_TYPE, and still no fetch.
+      let fetched = false;
+      const typed = await sendAgentMessage({ root, to: TO, body: "hi", type: "osp.grant.request", fetchUtxos: async () => { fetched = true; return []; } });
+      expect(typed.ok).toBe(false);
+      if (typed.ok) return;
+      expect(typed.code).toBe("BAD_BODY");
+      expect(fetched).toBe(false);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
@@ -491,6 +499,62 @@ describe("agent_message MCP boundary", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  // S4: typed bodies ride the same tool. Validation parity runs BEFORE the
+  // policy gate, so a disabled vault still surfaces BAD_BODY/BAD_TYPE for
+  // malformed typed input — and never reaches the network.
+  const TYPED_REQ = JSON.stringify({
+    scope: '{"allow":["read:users"],"rate":"60/min","salt":"00112233445566778899aabbccddeeff"}',
+    doorGenesisTxid: "ab".repeat(32),
+    doorOwnerAddress: TO,
+    reason: "need read access",
+    sessionPubHex: "02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+  });
+
+  async function callAgentMessage(root: string, args: Record<string, unknown>) {
+    const server = createServer(root);
+    const client = new Client({ name: "msg-typed-test", version: "1" });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(b);
+    await client.connect(a);
+    try {
+      const res = await client.callTool({ name: "agent_message", arguments: args });
+      return JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }
+
+  test("S4: invalid typed body rejects BAD_BODY before the policy gate", async () => {
+    const root = scratch();
+    try {
+      initVault(root); // messages policy absent = disabled
+      const parsed = await callAgentMessage(root, { to: TO, body: JSON.stringify({ scope: "" }), type: "osp.grant.request" });
+      expect(parsed.ok).toBe(false);
+      expect(parsed.code).toBe("BAD_BODY");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("S4: unknown type rejects BAD_TYPE before the policy gate", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      const parsed = await callAgentMessage(root, { to: TO, body: "hello", type: "osp.grant.bogus" });
+      expect(parsed.ok).toBe(false);
+      expect(parsed.code).toBe("BAD_TYPE");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("S4: valid typed body on a disabled vault still DISABLED (validation precedes policy)", async () => {
+    const root = scratch();
+    try {
+      initVault(root);
+      const parsed = await callAgentMessage(root, { to: TO, body: TYPED_REQ, type: "osp.grant.request" });
+      expect(parsed.ok).toBe(false);
+      expect(parsed.code).toBe("DISABLED");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
 });
 
 describe("agent-message CLI boundary", () => {
@@ -540,6 +604,23 @@ describe("agent-message CLI boundary", () => {
       const [, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
       expect(exit).toBe(1);
       expect(stderr).toContain("Usage");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("S4: --type osp.grant.request with a bad body exits 1 BAD_BODY before the policy gate", async () => {
+    const root = scratch();
+    try {
+      initVault(root); // disabled vault: typed validation must still win
+      const child = Bun.spawn([process.execPath, "src/cli.ts", "agent-message", TO, '{"scope":""}', "--type", "osp.grant.request", "--json"], {
+        cwd: resolve(import.meta.dir, ".."),
+        env: { ...process.env, DOGFOOD_WALLET_DIR: root },
+        stdout: "pipe", stderr: "pipe",
+      });
+      const [stdout, , exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+      expect(exit).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.ok).toBe(false);
+      expect(parsed.code).toBe("BAD_BODY");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

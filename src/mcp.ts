@@ -70,15 +70,16 @@ export function createServer(root: string) {
     "agent_message",
     {
       description:
-        "Send a signed on-chain agent message (type 'message' only) with a 1-sat recipient inbox tip. Requires an explicit policy.messages block; absent = DISABLED. Fail-closed caps: maxPerDay, maxBodyBytes, optional recipients allowlist; killfile freezes sends. Body is public and permanent — never secrets. Ambiguous broadcast outcome = PAYMENT_HELD; no automatic retry.",
+        "Send a signed on-chain agent message with a 1-sat recipient inbox tip. Types: 'message' (default, plain text), 'osp.grant.request' / 'osp.grant.receipt' (S4 typed bodies as JSON text, validated at filing parity before any key or chain access). Requires an explicit policy.messages block; absent = DISABLED. Fail-closed caps: maxPerDay, maxBodyBytes, optional recipients allowlist; killfile freezes sends. Body is public and permanent — never secrets. Ambiguous broadcast outcome = PAYMENT_HELD; no automatic retry.",
       inputSchema: {
         to: z.string().describe("Recipient mainnet P2PKH address"),
-        body: z.string().describe("Message body (UTF-8 text, within policy.messages.maxBodyBytes)"),
+        body: z.string().describe("Message body: UTF-8 text for type 'message'; JSON text of the typed object for osp.grant.* types (within policy.messages.maxBodyBytes)"),
+        type: z.string().optional().describe("Message type: 'message' (default), 'osp.grant.request', 'osp.grant.receipt'. Unknown types reject BAD_TYPE."),
       },
     },
-    async ({ to, body }) => {
+    async ({ to, body, type }) => {
       const { sendAgentMessage } = await import("./agent-message-send");
-      const result = await sendAgentMessage({ root, to, body });
+      const result = await sendAgentMessage({ root, to, body, type });
       return text(result, !result.ok);
     },
   );

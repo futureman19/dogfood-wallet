@@ -69,6 +69,7 @@
     "src/agent-message.ts",
     "src/agent-message-send.ts",
     "src/agent-message-inbox.ts",
+    "src/agent-message-osp.ts",
     "src/inbox-tips.ts",
     "src/allowance.ts",
     "src/auth-sign.ts",

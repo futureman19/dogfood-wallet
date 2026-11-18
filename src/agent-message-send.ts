@@ -1,9 +1,13 @@
-// Guarded agent-message send (agent messaging S2).
+// Guarded agent-message send (agent messaging S2/S4).
 //
 // Wires the S1 codec (agent-message.ts) into the SAME payment guard, policy
 // engine, BRC-181 gate, and source-verification machinery as every other
 // spend. A message is a BSV transaction: 1-sat inbox tip to the recipient,
 // one OP_RETURN carrying the BitCom B|MAP|AIP envelope, optional change.
+//
+// S4: plain `message` plus OSP typed bodies osp.grant.request /
+// osp.grant.receipt, validated with filing-parity rules (agent-message-osp)
+// before any key or chain access.
 //
 // Safety properties (all inherited from the shared rails):
 // - policy.messages absent = DISABLED (fail-closed); killfile wins.
@@ -23,6 +27,7 @@ import { gateAgentSend, loadPolicyEnvelope } from "./brc181";
 import { excludeInboxTips, loadInboxTips, markInboxTip } from "./inbox-tips";
 import { inspectPaymentHold, PaymentHeldError, withPaymentGuard } from "./payment-guard";
 import { evaluateMessageSend, messageCountFromLog } from "./policy";
+import { parseGrantRequestBody, parseGrantReceiptBody } from "./agent-message-osp";
 import { defaultBroadcast, defaultFetchTxHex, defaultFetchUtxos, type Utxo } from "./send";
 import { loadUsage, loadVault, vaultPaths } from "./vault";
 
@@ -35,8 +40,11 @@ export type AgentMessageSendResult =
 export type AgentMessageSendOptions = {
   root: string;
   to: string;
-  body: string;
-  /** S2 ships only type "message"; anything else is rejected. */
+  /** UTF-8 text for type "message"; for osp.grant.* types the typed body
+   * as an object or its JSON text (validated at filing parity). Public and
+   * permanent — never secrets. */
+  body: string | Record<string, unknown>;
+  /** "message" (default), "osp.grant.request" or "osp.grant.receipt" (S4). */
   type?: string;
   /** 32 lowercase hex chars; random when omitted. */
   nonce?: string;
@@ -79,14 +87,38 @@ export async function sendAgentMessage(opts: AgentMessageSendOptions): Promise<A
   return await withPaymentGuard(root, "agent-message", async (guard): Promise<AgentMessageSendResult> => {
     const vault = loadVault(root);
     const type = opts.type ?? "message";
-    if (type !== "message") return { ok: false, code: "BAD_TYPE", message: "S2 sends only type 'message'." };
+    if (type !== "message" && type !== "osp.grant.request" && type !== "osp.grant.receipt") {
+      return { ok: false, code: "BAD_TYPE", message: "type must be message, osp.grant.request or osp.grant.receipt" };
+    }
+    // S4 typed bodies: the wire format is the S1 codec's (typed bodies are
+    // JSON objects). Accept an object or its JSON text, validate at filing
+    // parity BEFORE any key or chain access, then carry the parsed object
+    // in the envelope. Receipts are pointers only — the chain stays truth.
+    let envelopeBody: unknown = body;
+    if (type === "osp.grant.request") {
+      try {
+        envelopeBody = parseGrantRequestBody(body);
+      } catch (e) {
+        return { ok: false, code: "BAD_BODY", message: `invalid osp.grant.request body: ${(e as Error).message}` };
+      }
+    }
+    if (type === "osp.grant.receipt") {
+      try {
+        envelopeBody = parseGrantReceiptBody(body);
+      } catch (e) {
+        return { ok: false, code: "BAD_BODY", message: `invalid osp.grant.receipt body: ${(e as Error).message}` };
+      }
+    }
+    if (type === "message" && typeof body !== "string") {
+      return { ok: false, code: "BAD_BODY", message: "type 'message' body must be a string" };
+    }
 
     const today = new Date(now());
     const decision = evaluateMessageSend(
       vault.policy.messages,
       existsSync(vaultPaths(root).kill),
       opts.to,
-      Buffer.byteLength(body, "utf8"),
+      Buffer.byteLength(typeof body === "string" ? body : JSON.stringify(body), "utf8"),
       messageCountFromLog(readLogLines(root), today),
     );
     if (!decision.ok) return decision;
@@ -103,7 +135,7 @@ export async function sendAgentMessage(opts: AgentMessageSendOptions): Promise<A
     // network access. signEnvelope/buildMessageScript are deterministic.
     const nonce = opts.nonce ?? randomNonce();
     const ts = opts.ts ?? Math.floor(now() / 1000);
-    const unsigned = { v: 1, app: "dogfood", type, from: vault.address, to: opts.to, nonce, ts, body };
+    const unsigned = { v: 1, app: "dogfood", type, from: vault.address, to: opts.to, nonce, ts, body: envelopeBody };
     let signed: Envelope;
     let scriptHex: string;
     try {
