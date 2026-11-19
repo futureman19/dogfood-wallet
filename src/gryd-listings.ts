@@ -23,12 +23,12 @@ export function listingScript(cancelAddress: string, payAddress: string, price: 
     .writeBin(payout).writeScript(Script.fromHex(ORD_LOCK_SUFFIX));
 }
 type Common = { root: string; noBroadcast?: boolean; fetchFn?: typeof fetch; broadcast?: (raw: string) => Promise<{txid: string}> };
-export type ListOptions = Common & { ordinalOutpoint: string; priceSats: number };
+export type ListOptions = Common & { ordinalOutpoint: string; priceSats: number; sellerIdentity?: 'property' | 'main' };
 export type CancelOptions = Common & { listingOutpoint: string };
 type Preview = {
   operation: 'agent-list' | 'agent-cancel-listing'; sourceOutpoint: string; agentId: string;
   propertyAddress: string; payAddress: string; price: number; minerFee: number;
-  backendCompatible: false;
+  backendCompatible: false; sellerIdentity: 'property' | 'main';
   inputs: {outpoint: string; satoshis: number; role: string}[];
   outputs: {index: number; satoshis: number; address: string | null; role: string}[];
 };
@@ -75,13 +75,14 @@ async function resolveIdentity(root: string, point: string, cancel: boolean, fet
 export async function listAgent(options: ListOptions): Promise<ListingResult> {
   const point = normalizeListingOutpoint(options.ordinalOutpoint);
   priceCheck(options.priceSats);
-  return transact(options, point, options.priceSats, false);
+  if (options.sellerIdentity !== undefined && options.sellerIdentity !== 'property' && options.sellerIdentity !== 'main') throw new Error('sellerIdentity must be property or main');
+  return transact(options, point, options.priceSats, false, options.sellerIdentity ?? 'property');
 }
 export async function cancelAgentListing(options: CancelOptions): Promise<ListingResult> {
   const point = normalizeListingOutpoint(options.listingOutpoint);
-  return transact(options, point, 0, true);
+  return transact(options, point, 0, true, 'property');
 }
-async function transact(options: Common, point: string, price: number, cancel: boolean): Promise<ListingResult> {
+async function transact(options: Common, point: string, price: number, cancel: boolean, seller: 'property' | 'main' = 'property'): Promise<ListingResult> {
   if (options.noBroadcast !== undefined && typeof options.noBroadcast !== 'boolean') throw new Error('Invalid preview option');
   const operation = cancel ? 'agent-cancel-listing' : 'agent-list';
   const fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
@@ -89,6 +90,8 @@ async function transact(options: Common, point: string, price: number, cancel: b
     const vault = loadVault(options.root);
     if (vault.policy.killfileOn) throw new Error('STOP_SPENDING is on');
     const property = propertyKey(vault.key), propertyAddress = property.toAddress();
+    const sellerKey = seller === 'main' ? vault.key : property;
+    const cancelAddress = seller === 'main' ? vault.address : propertyAddress;
     if (propertyAddress === vault.address) throw new Error('Property/payment key collision');
     const [txid, indexText] = point.split('_'), index = Number(indexText);
     const source = await sourceTransaction(txid!, fetchFn), ordinal = source.outputs[index];
@@ -116,7 +119,7 @@ async function transact(options: Common, point: string, price: number, cancel: b
       sign: async(t,i) => (await p2pkh.sign(t,i)).writeOpCode(0x51),
       estimateLength: async() => 109,
     } : p2pkh});
-    tx.addOutput({satoshis:1,lockingScript:cancel?propertyLock:listingScript(propertyAddress,vault.address,price)});
+    tx.addOutput({satoshis:1,lockingScript:cancel?propertyLock:listingScript(cancelAddress,vault.address,price)});
     tx.addOutput({satoshis:0,lockingScript:mainLock,change:true});
     let total = 0, funded = false;
     for (const coin of coins) {
@@ -130,9 +133,9 @@ async function transact(options: Common, point: string, price: number, cancel: b
     }
     if (!funded) throw new Error('Insufficient main payment coins for miner fee and change');
     const minerFee = total-tx.outputs[1]!.satoshis!;
-    const preview: Preview = {operation,sourceOutpoint:point,agentId,propertyAddress,payAddress:vault.address,price,minerFee,backendCompatible:false,
+    const preview: Preview = {operation,sourceOutpoint:point,agentId,propertyAddress,payAddress:vault.address,price,minerFee,backendCompatible:false,sellerIdentity:seller,
       inputs:tx.inputs.map((input,i)=>({outpoint:`${input.sourceTXID}_${input.sourceOutputIndex}`,satoshis:input.sourceTransaction!.outputs[input.sourceOutputIndex]!.satoshis!,role:i===0?'property ordinal':'payment coin'})),
-      outputs:tx.outputs.map((o,i)=>({index:i,satoshis:o.satoshis!,address:p2pkhAddressFromLock(o.lockingScript.toHex()),role:i===0?(cancel?'property (isolated)':'legacy OrdLock (property cancel / main payout)'):'payment change'}))};
+      outputs:tx.outputs.map((o,i)=>({index:i,satoshis:o.satoshis!,address:p2pkhAddressFromLock(o.lockingScript.toHex()),role:i===0?(cancel?'property (isolated)':`legacy OrdLock (${seller} cancel / main payout)`):'payment change'}))};
     if (options.noBroadcast) return {...preview,mode:'preview'};
     await checkOrdinal();
     const refreshed = await unspent(fundingUrl,fetchFn);
@@ -145,7 +148,7 @@ async function transact(options: Common, point: string, price: number, cancel: b
       if (!new Spend({sourceTXID:input.sourceTXID!,sourceOutputIndex:input.sourceOutputIndex,sourceSatoshis:previous.satoshis!,lockingScript:previous.lockingScript,transactionVersion:tx.version,otherInputs:tx.inputs.filter((_,j)=>j!==i),inputIndex:i,unlockingScript:input.unlockingScript!,inputSequence:input.sequence??0xffffffff,outputs:tx.outputs,lockTime:tx.lockTime}).validate()) throw new Error('Input validation failed; hold retained');
     }
     const rawTx=tx.toHex(), id=tx.id('hex');
-    const envelope=signAgentRequest(cancel?'agent.cancel_listing':'agent.list',cancel?{}:{price_sats:price,listing_type:'sale',outpoint:`${id}_0`,list_txid:id}, {method:'POST',path:`/api/v1/agents/${encodeURIComponent(agentId)}/${cancel?'listing/cancel':'list'}`},property,{network:'mainnet'});
+    const envelope=signAgentRequest(cancel?'agent.cancel_listing':'agent.list',cancel?{}:{price_sats:price,listing_type:'sale',outpoint:`${id}_0`,list_txid:id}, {method:'POST',path:`/api/v1/agents/${encodeURIComponent(agentId)}/${cancel?'listing/cancel':'list'}`},sellerKey,{network:'mainnet'});
     const directory=join(options.root,'gryd-listings'); mkdirSync(directory,{recursive:true,mode:0o700});
     const fd=openSync(join(directory,`${id}.json`),'wx',0o600);
     try {writeFileSync(fd,JSON.stringify({version:1,paymentId:guard.id,...preview,txid:id,rawTx,propertyPubkey:property.toPublicKey().toString(),derivation:DERIVATION})+'\n');fsyncSync(fd);} finally {closeSync(fd);}

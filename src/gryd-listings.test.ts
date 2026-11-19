@@ -73,3 +73,34 @@ test('CLI help advertises both human-only Phase 3 commands',()=>{
  expect(result.exitCode).toBe(0);expect(result.stdout.toString()).toContain('agent-cancel-listing');expect(result.stdout.toString()).toContain('agent-list');
 });
 test('human CLI preview, strict flags, package allowlist and MCP isolation',()=>{const h=harness();try{const preload=join(h.root,'preload.ts');writeFileSync(preload,`const m=new Map(${JSON.stringify([...h.responses])});globalThis.fetch=async(u,i)=>{if(i?.method!=='GET')throw Error('POST forbidden');const k=String(u).replace('https://api.whatsonchain.com/v1/bsv/main','');if(!m.has(k))throw Error(k);const b=m.get(k);return new Response(typeof b==='string'?b:JSON.stringify(b));};`);const run=(args:string[])=>Bun.spawnSync([process.execPath,'--preload',preload,'src/cli.ts',...args],{cwd:join(import.meta.dir,'..'),env:{...process.env,DOGFOOD_WALLET_DIR:h.root}});const r=run(['agent-list',h.point,'1000','--no-broadcast']);expect(r.exitCode).toBe(0);expect(JSON.parse(r.stdout.toString()).mode).toBe('preview');for(const args of [['agent-list',h.point,'1e3'],['agent-list',h.point,'1','--bad'],['agent-cancel-listing',h.point,'--bad']])expect(run(args).exitCode).not.toBe(0);expect(JSON.parse(readFileSync(join(import.meta.dir,'../package.json'),'utf8')).files).toContain('src/gryd-listings.ts');expect(readFileSync(join(import.meta.dir,'mcp.ts'),'utf8')).not.toMatch(/gryd-listings|agent-list|cancelAgentListing|listAgent/);}finally{h.clean()}});
+
+test('main-seller list pins cancellation to owner identity, signs with owner key, ordinal still property-spent',async()=>{
+ const h=harness();try{
+  const r=await h.run({sellerIdentity:'main'});
+  expect(r.mode).toBe('broadcast');expect(r.sellerIdentity).toBe('main');if(r.mode!=='broadcast')throw Error('mode');
+  const tx=Transaction.fromHex(h.raw);
+  expect(tx.outputs[0]!.lockingScript.toHex()).toBe(listing.listingScript(h.v.address,h.v.address,1000).toHex());
+  expect(r.envelope.address).toBe(h.v.address);
+  expect(r.envelope.pubkey).toBe(h.v.key.toPublicKey().toString());
+  expect(r.envelope.address).not.toBe(h.property.toAddress());
+  expect(r.envelope.payload).toMatchObject({action:'agent.list',method:'POST',path:'/api/v1/agents/object%3A42/list',body:{price_sats:1000,listing_type:'sale',outpoint:tx.id('hex')+'_0',list_txid:tx.id('hex')}});
+  for(const [i,prev] of [h.ordinal,h.funding].entries()){const input=tx.inputs[i]!;expect(new Spend({sourceTXID:input.sourceTXID!,sourceOutputIndex:0,sourceSatoshis:prev.outputs[0]!.satoshis!,lockingScript:prev.outputs[0]!.lockingScript,transactionVersion:tx.version,otherInputs:tx.inputs.filter((_,j)=>j!==i),inputIndex:i,unlockingScript:input.unlockingScript!,inputSequence:input.sequence!,outputs:tx.outputs,lockTime:tx.lockTime}).validate()).toBe(true);}
+  expect(h.broadcasts).toBe(1);expect(inspectPaymentHold(h.root).blocked).toBe(false);
+ }finally{h.clean()}
+});
+test('default list mode stays property-seller; main mode is opt-in and preview-safe',async()=>{
+ const h=harness();try{const d=await h.run({noBroadcast:true});expect(d.mode).toBe('preview');expect(d.sellerIdentity).toBe('property');expect(JSON.stringify(d)).not.toMatch(/rawTx|envelope|signature|unlockingScript/);}finally{h.clean()}
+ const m=harness();try{const p=await m.run({noBroadcast:true,sellerIdentity:'main'});expect(p.mode).toBe('preview');expect(p.sellerIdentity).toBe('main');expect(JSON.stringify(p)).not.toMatch(/rawTx|envelope|signature|unlockingScript/);expect(m.broadcasts).toBe(0);}finally{m.clean()}
+});
+test('main-seller mode rejects an invalid identity before any broadcast',async()=>{
+ const h=harness();try{await expect(h.run({sellerIdentity:'bogus'})).rejects.toThrow('sellerIdentity');expect(h.broadcasts).toBe(0);}finally{h.clean()}
+});
+test('CLI --seller-main preview is owner-seller; default property; strict flags',()=>{
+ const h=harness();try{
+  const preload=join(h.root,'preload.ts');writeFileSync(preload,`const m=new Map(${JSON.stringify([...h.responses])});globalThis.fetch=async(u,i)=>{if(i?.method!=='GET')throw Error('POST forbidden');const k=String(u).replace('https://api.whatsonchain.com/v1/bsv/main','');if(!m.has(k))throw Error(k);const b=m.get(k);return new Response(typeof b==='string'?b:JSON.stringify(b));};`);
+  const run=(args:string[])=>Bun.spawnSync([process.execPath,'--preload',preload,'src/cli.ts',...args],{cwd:join(import.meta.dir,'..'),env:{...process.env,DOGFOOD_WALLET_DIR:h.root}});
+  const r=run(['agent-list',h.point,'1000','--seller-main','--no-broadcast']);expect(r.exitCode).toBe(0);const j=JSON.parse(r.stdout.toString());expect(j.mode).toBe('preview');expect(j.sellerIdentity).toBe('main');
+  const d=run(['agent-list',h.point,'1000','--no-broadcast']);expect(JSON.parse(d.stdout.toString()).sellerIdentity).toBe('property');
+  for(const args of [['agent-list',h.point,'1','--seller-main','--bad'],['agent-list',h.point,'1','--seller-main','--seller-main']])expect(run(args).exitCode).not.toBe(0);
+ }finally{h.clean()}
+});
