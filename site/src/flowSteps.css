@@ -29,7 +29,7 @@
   outline-offset: 2px;
 }
 .flow-trigger .flow-sub {
-  font-size: 8px;
+  font-size: 11px;
   color: #a7bfae;
   margin-top: 4px;
 }
@@ -82,7 +82,7 @@
     font-size: 11px;
   }
   .flow-trigger .flow-sub {
-    font-size: 10px;
+    font-size: 11px;
     margin: 0;
   }
   .flow-chevron {

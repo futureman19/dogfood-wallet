@@ -167,8 +167,8 @@ svg {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 .eyebrow {
-  font-size: 10px;
-  letter-spacing: 0.16em;
+  font-size: 11px;
+  
   color: #8bbb9d;
   display: flex;
   align-items: center;
@@ -250,7 +250,7 @@ h2 span {
 }
 .install-note {
   color: #83998b;
-  font-size: 10px;
+  font-size: 11px;
   margin: 12px 0 27px;
   line-height: 1.7;
 }
@@ -376,15 +376,15 @@ h2 span {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 9px;
-  letter-spacing: 0.06em;
+  font-size: 11px;
+  
   color: #9cbea7;
   margin: 0 3px 17px;
 }
 .preview-caption > span:last-child {
   margin-left: auto;
   color: #7c9485;
-  font-size: 8px;
+  font-size: 11px;
 }
 .flow-panel {
   position: relative;
@@ -398,8 +398,8 @@ h2 span {
 }
 .panel-eyebrow {
   color: #90b69d;
-  font-size: 8px;
-  letter-spacing: 0.15em;
+  font-size: 11px;
+  
   margin-bottom: 19px;
 }
 .flow {
@@ -434,7 +434,7 @@ h2 span {
   white-space: nowrap;
 }
 .flow li > span {
-  font-size: 8px;
+  font-size: 11px;
   color: #91a899;
   margin-top: 4px;
   white-space: nowrap;
@@ -466,11 +466,11 @@ h2 span {
 .vault-heading {
   justify-content: space-between;
   color: #a5e4b8;
-  font-size: 10px;
-  letter-spacing: 0.055em;
+  font-size: 11px;
+  
 }
 .local-badge {
-  font-size: 7px;
+  font-size: 11px;
   padding: 4px 5px;
   border: 1px solid #4c845852;
   border-radius: 3px;
@@ -503,9 +503,9 @@ h2 span {
 .bowl-display span {
   position: relative;
   font:
-    7px ui-monospace,
+    11px ui-monospace,
     monospace;
-  letter-spacing: 0.08em;
+  
   color: #86b496;
   margin-top: 8px;
 }
@@ -531,9 +531,9 @@ h2 span {
   transform: rotate(24deg);
 }
 .cap-label {
-  font-size: 8px;
+  font-size: 11px;
   color: #94b19e;
-  letter-spacing: 0.1em;
+  
 }
 .cap-value {
   font-size: 31px;
@@ -551,7 +551,7 @@ h2 span {
   letter-spacing: 0;
 }
 .cap-note {
-  font-size: 9px;
+  font-size: 11px;
   color: #90a896;
   margin-top: 5px;
 }
@@ -567,9 +567,9 @@ h2 span {
   border: 1px solid #9c414b;
   border-radius: 5px;
   color: #ffa0a8;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  
 }
 .kill-switch:hover {
   background: #552027;
@@ -579,7 +579,7 @@ h2 span {
   display: block;
   text-align: center;
   color: #8f9e92;
-  font-size: 7px;
+  font-size: 11px;
   margin-top: 7px;
 }
 .policy-row,
@@ -588,7 +588,7 @@ h2 span {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  font-size: 9px;
+  font-size: 11px;
 }
 .policy-row {
   padding: 12px 0;
@@ -601,17 +601,17 @@ h2 span {
   gap: 7px;
 }
 .policy-row strong {
-  font-size: 8px;
+  font-size: 11px;
   color: #e4b776;
   font-weight: 400;
 }
 .owner-row {
   color: #91a997;
-  font-size: 8px;
+  font-size: 11px;
 }
 .owner-row > span:last-child {
-  font-size: 7px;
-  letter-spacing: 0.05em;
+  font-size: 11px;
+  
 }
 .terminal-panel {
   position: relative;
@@ -630,7 +630,7 @@ h2 span {
   padding: 13px 16px;
   border-bottom: 1px solid #64887422;
   color: #93a79a;
-  font-size: 9px;
+  font-size: 11px;
 }
 .terminal-bar > span {
   display: inline-flex;
@@ -638,9 +638,9 @@ h2 span {
   gap: 7px;
 }
 .terminal-bar > span:last-child {
-  font-size: 7px;
+  font-size: 11px;
   color: #85998b;
-  letter-spacing: 0.08em;
+  
 }
 .window-dots i {
   width: 6px;
@@ -656,7 +656,7 @@ h2 span {
 }
 .terminal-content {
   padding: 18px 20px 21px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.85;
   color: #c2d7c8;
   overflow-wrap: anywhere;
@@ -689,7 +689,7 @@ h2 span {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  font-size: 8px;
+  font-size: 11px;
   color: #94ab9c;
   margin-top: 23px;
 }
@@ -707,7 +707,7 @@ h2 span {
   margin: 0 0 6px;
 }
 .site-footer > div > span {
-  font-size: 9px;
+  font-size: 11px;
   color: #84958a;
   display: block;
   line-height: 1.7;
@@ -753,10 +753,10 @@ h2 span {
     padding-inline: 16px;
   }
   .vault-heading {
-    font-size: 8px;
+    font-size: 11px;
   }
   .local-badge {
-    font-size: 6px;
+    font-size: 11px;
   }
   .flow-panel {
     margin-right: 12px;
@@ -766,7 +766,7 @@ h2 span {
     margin-right: 12px;
   }
   .terminal-content {
-    font-size: 9px;
+    font-size: 11px;
     padding-inline: 15px;
   }
   .bowl-orbit {
@@ -778,10 +778,10 @@ h2 span {
     width: 105px;
   }
   .flow strong {
-    font-size: 10px;
+    font-size: 11px;
   }
   .flow li > span {
-    font-size: 7px;
+    font-size: 11px;
   }
 }
 @media (max-width: 960px) {
@@ -852,11 +852,11 @@ h2 span {
     font-size: 11px;
   }
   .brand > span > span {
-    font-size: 8px;
+    font-size: 11px;
   }
   .github-link {
     padding: 10px;
-    font-size: 10px;
+    font-size: 11px;
     gap: 6px;
   }
   .github-link > svg:last-child {
@@ -879,8 +879,8 @@ h2 span {
     padding-bottom: 34px;
   }
   .eyebrow {
-    font-size: 8px;
-    letter-spacing: 0.12em;
+    font-size: 11px;
+    
     margin-bottom: 21px;
   }
   h1 {
@@ -909,7 +909,7 @@ h2 span {
     font-size: 11px;
   }
   .install-note {
-    font-size: 9px;
+    font-size: 11px;
     margin-top: 8px;
     margin-bottom: 20px;
   }
@@ -922,11 +922,11 @@ h2 span {
     padding-top: 17px;
   }
   .preview-caption {
-    font-size: 7px;
+    font-size: 11px;
     gap: 5px;
   }
   .preview-caption > span:last-child {
-    font-size: 6px;
+    font-size: 11px;
   }
   .flow-panel {
     padding: 16px 9px 37px;
@@ -934,14 +934,14 @@ h2 span {
     border-radius: 9px;
   }
   .panel-eyebrow {
-    font-size: 7px;
-    letter-spacing: 0.07em;
+    font-size: 11px;
+    
   }
   .flow strong {
-    font-size: 9px;
+    font-size: 11px;
   }
   .flow li > span {
-    font-size: 6px;
+    font-size: 11px;
   }
   .flow-icon {
     width: 32px;
@@ -958,7 +958,7 @@ h2 span {
     border-radius: 9px;
   }
   .vault-heading {
-    font-size: 8px;
+    font-size: 11px;
     letter-spacing: 0;
     gap: 6px;
   }
@@ -966,7 +966,7 @@ h2 span {
     gap: 5px;
   }
   .local-badge {
-    font-size: 6px;
+    font-size: 11px;
     padding: 3px;
   }
   .vault-body {
@@ -987,32 +987,32 @@ h2 span {
     height: 80px;
   }
   .bowl-display span {
-    font-size: 6px;
+    font-size: 11px;
   }
   .cap-label {
-    font-size: 7px;
+    font-size: 11px;
   }
   .cap-value {
     font-size: 27px;
   }
   .cap-note {
-    font-size: 8px;
+    font-size: 11px;
   }
   .kill-switch {
     gap: 6px;
-    font-size: 8px;
+    font-size: 11px;
     min-height: 42px;
     margin-top: 12px;
     padding: 10px 6px;
   }
   .docs-note {
-    font-size: 6px;
+    font-size: 11px;
   }
   .policy-row {
-    font-size: 8px;
+    font-size: 11px;
   }
   .policy-row strong {
-    font-size: 7px;
+    font-size: 11px;
   }
   .terminal-panel {
     margin: -19px 10px 0 0;
@@ -1020,23 +1020,23 @@ h2 span {
   }
   .terminal-bar {
     padding: 12px;
-    font-size: 8px;
+    font-size: 11px;
   }
   .terminal-bar > span {
     gap: 5px;
   }
   .terminal-bar > span:last-child {
-    font-size: 6px;
+    font-size: 11px;
   }
   .terminal-content {
     padding: 16px 13px;
-    font-size: 9px;
+    font-size: 11px;
   }
   .terminal-muted {
     width: 51px;
   }
   .preview-bottom {
-    font-size: 7px;
+    font-size: 11px;
     margin-top: 18px;
   }
   .site-footer {
@@ -1047,10 +1047,10 @@ h2 span {
     font-size: 11px;
   }
   .site-footer > div > span {
-    font-size: 9px;
+    font-size: 11px;
   }
   .agent-list {
-    font-size: 10px;
+    font-size: 11px;
     gap: 14px;
   }
 }
@@ -1062,7 +1062,7 @@ h2 span {
     display: none;
   }
   .terminal-content {
-    font-size: 8px;
+    font-size: 11px;
   }
   .vault-body {
     gap: 8px;
@@ -1098,7 +1098,7 @@ h2 span {
     font-size: 12px;
   }
   .flow li > span {
-    font-size: 10px;
+    font-size: 11px;
     margin: 0;
     white-space: normal;
   }
@@ -1112,39 +1112,39 @@ h2 span {
     padding-inline: 16px;
   }
   .panel-eyebrow {
-    font-size: 9px;
+    font-size: 11px;
   }
   .preview-caption {
-    font-size: 8px;
+    font-size: 11px;
     flex-wrap: wrap;
   }
   .preview-caption > span:last-child {
-    font-size: 8px;
+    font-size: 11px;
   }
   .vault-heading {
-    font-size: 9px;
+    font-size: 11px;
   }
   .local-badge {
     display: none;
   }
   .cap-label,
   .cap-note {
-    font-size: 9px;
+    font-size: 11px;
   }
   .docs-note {
-    font-size: 8px;
+    font-size: 11px;
     line-height: 1.5;
   }
   .kill-switch {
-    font-size: 9px;
+    font-size: 11px;
   }
   .policy-row,
   .owner-row {
-    font-size: 10px;
+    font-size: 11px;
   }
   .policy-row strong,
   .owner-row > span:last-child {
-    font-size: 8px;
+    font-size: 11px;
   }
   .terminal-content {
     font-size: 11px;
@@ -1155,13 +1155,13 @@ h2 span {
     min-width: 66px;
   }
   .terminal-bar {
-    font-size: 9px;
+    font-size: 11px;
   }
   .terminal-bar > span:last-child {
-    font-size: 8px;
+    font-size: 11px;
   }
   .preview-bottom {
-    font-size: 9px;
+    font-size: 11px;
     text-align: center;
   }
 }
@@ -1219,7 +1219,7 @@ h2 span {
   font-family: "JetBrains Mono", monospace;
   font-size: 11px;
   color: var(--accent);
-  letter-spacing: 0.12em;
+  
 }
 .flow-card h3 {
   margin: 8px 0 6px;
@@ -1259,8 +1259,8 @@ h2 span {
 }
 .rail-tag {
   font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: 11px;
+  
   text-transform: uppercase;
   color: var(--accent);
   border: 1px solid rgba(100, 234, 163, 0.3);
