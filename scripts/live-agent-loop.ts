@@ -249,8 +249,8 @@ async function main() {
       return await r.text();
     };
     // Preflight: door health + funded balances.
-    const hz = await (await chainFetch(`${doorUrl}/healthz`)).json() as { crypto?: { ok?: boolean } };
-    if (!hz.crypto?.ok) fail("door worker /healthz crypto not ok");
+    const hz = await (await chainFetch(`${doorUrl}/healthz`)).json() as { crypto?: string };
+    if (hz.crypto !== "ok") fail(`door worker /healthz crypto not ok: ${String(hz.crypto)}`);
     const info = await (await chainFetch(`${WOC}/chain/info`)).json() as { blocks: number };
     height = info.blocks;
     for (const [label, root, need] of [["A", rootA, 3000], ["B", rootB, 4000]] as const) {
