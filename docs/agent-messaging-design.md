@@ -757,9 +757,24 @@ authorization. Disposable vaults + intercepted network for all tests.
   Independently verified: WoC mempool lookup (828 bytes); recipient-side
   keyless inbox scan returned the exact body with `verified: true`
   (envelope + AIP signatures over the 006a script), correct tip payee,
-  `transport: option-a`, `untrusted: true`. Block confirmation pending at
-  acceptance time (mempool). Grant-request round trip on a test door was
-  NOT exercised (optional; not authorized beyond the single message).
+  `transport: option-a`, `untrusted: true`. Confirmed in block 976050
+  (independently re-verified 2026-11-20, 318+ confirmations). Grant-request
+  round trip on a test door was NOT exercised at S5 (optional; not
+  authorized beyond the single message) — see S6.
+- **S6 — Live cross-agent loop harness. 🛠 BUILT 2026-11-20 (dry-run green; live gated).**
+  `scripts/live-agent-loop.ts` orchestrates the full §7.2/§7.3 round trip:
+  genesis → request message → inbox verify → file → approve/grant → door
+  session + replay 403 (live) → receipt message → on-chain verify →
+  revoke-close + dead-session 403 (live). Dry-run (default): two disposable
+  vaults on one intercepted chain; grant and revoke self-verified against
+  the DEPLOYED door predicate (sibling `agent-border-protocol/door/src/verify.js`);
+  tampered-receipt and grant-replay controls rejected. Measured dry-run
+  spend: 4,446 sats (genesis 227, request 1,730, grant 408, receipt 1,707,
+  revoke 374) — typed messages cost ~1.7k sats, not the 1,374 of a plain
+  short text. Hard sat cap checked BEFORE every spend (default 6,000).
+  Live mode requires pre-created, pre-funded disposable vaults plus
+  `--authorize-broadcast`; it never creates or funds vaults (funding stays
+  an explicit owner action). Full verify 1411/0.
 
 Gate for every slice: `bun run verify` green (full tests + typecheck) before
 commit. This design doc is intentionally NOT added to `package.json` `files`
