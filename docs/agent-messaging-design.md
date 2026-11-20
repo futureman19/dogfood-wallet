@@ -1,8 +1,9 @@
 # Agent-to-Agent Messaging — v2 Design (Locus-native)
 
-**Status: S1–S5 IMPLEMENTED — funded acceptance PASSED 2026-11-18
+**Status: S1–S6 IMPLEMENTED — S5 funded acceptance PASSED 2026-11-18
 (txid `e02893c9e4a7c169b113d243787eb7a30ee7adb24e8c23655d6ba491472b56da`,
-§6.4/§6.4a amendments, §12 S5).** Implementation
+§6.4/§6.4a amendments, §12 S5); S6 live cross-agent loop PASSED 2026-11-20
+(mainnet grant `c1770b49…`, deployed door, §12 S6).** Implementation
 progress is tracked per slice in §12; funded steps still require explicit
 authorization. This revises v1 (`964bd54`) after
 grounding in the actual Locus Protocol spec and reference implementation
@@ -761,7 +762,7 @@ authorization. Disposable vaults + intercepted network for all tests.
   (independently re-verified 2026-11-20, 318+ confirmations). Grant-request
   round trip on a test door was NOT exercised at S5 (optional; not
   authorized beyond the single message) — see S6.
-- **S6 — Live cross-agent loop harness. 🛠 BUILT 2026-11-20 (dry-run green; live gated).**
+- **S6 — Live cross-agent loop harness. ✅ LIVE ACCEPTANCE PASSED 2026-11-20 (mainnet, deployed door).**
   `scripts/live-agent-loop.ts` orchestrates the full §7.2/§7.3 round trip:
   genesis → request message → inbox verify → file → approve/grant → door
   session + replay 403 (live) → receipt message → on-chain verify →
@@ -775,6 +776,21 @@ authorization. Disposable vaults + intercepted network for all tests.
   Live mode requires pre-created, pre-funded disposable vaults plus
   `--authorize-broadcast`; it never creates or funds vaults (funding stays
   an explicit owner action). Full verify 1411/0.
+  **Live acceptance (2026-11-20):** funded two disposable vaults from the
+  shared Dogfood vault (5,000 sats each; owner-authorized), ran the full
+  loop on mainnet against the deployed door `loop-20261120`. All 8 steps
+  green: genesis `981eef65…` registered (200); request `23d1885b…` inbox-
+  verified + filed; grant `c1770b49…` self-verified against the deployed
+  predicate, accepted at the door → session token → `/data` 200 (real
+  payload, egress 65,136) → replay 403; receipt `316be60d…` on-chain
+  verified (paymentSats 0), tampered-receipt control rejected; revoke
+  `69a778ad…` closed the door (sessionsKilled) → dead-session `/data` 403,
+  grant-replay control rejected. **Total 4,441 sats** (genesis 227, request
+  1,727, grant 408, receipt 1,705, revoke 374), under the 6,000 cap. Two
+  live-only bugs found + fixed: WoC 429 GET backoff (POST broadcasts never
+  auto-resent) and the healthz `crypto` field is the string `"ok"`, not
+  `{ok}`. Evidence: 9 JSON files under the run's `evidence/`. Grant tx
+  confirmed present on WhatsOnChain (mempool at run time).
 
 Gate for every slice: `bun run verify` green (full tests + typecheck) before
 commit. This design doc is intentionally NOT added to `package.json` `files`
