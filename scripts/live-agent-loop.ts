@@ -220,7 +220,24 @@ async function main() {
     fetchUtxos = async (addr) => utxos.get(addr) ?? [];
     fetchTxHex = async (txid) => { const h = txs.get(txid); if (!h) throw new Error("unknown tx " + txid); return h; };
   } else {
-    chainFetch = globalThis.fetch.bind(globalThis);
+    // Rate-limit resilience: retry idempotent GET/HEAD on 429/503 with backoff.
+    // POSTs (ARC broadcast, door register/transition) pass through unchanged —
+    // a broadcast must never be blindly resent (ambiguous ack => payment hold).
+    const rawFetch = globalThis.fetch.bind(globalThis);
+    chainFetch = (async (input: any, init?: any) => {
+      const method = String(init?.method ?? "GET").toUpperCase();
+      const idempotent = method === "GET" || method === "HEAD";
+      for (let attempt = 0; ; attempt++) {
+        const r = await rawFetch(input, init);
+        if ((r.status === 429 || r.status === 503) && idempotent && attempt < 6) {
+          const wait = (attempt + 1) * 15_000;
+          console.log(`  WoC ${r.status}; GET backoff ${wait / 1000}s (retry ${attempt + 1}/6)`);
+          await sleep(wait);
+          continue;
+        }
+        return r;
+      }
+    }) as typeof fetch;
     fetchUtxos = async (addr) => {
       const r = await chainFetch(`${WOC}/address/${addr}/unspent`);
       if (!r.ok) throw new Error(`WoC unspent ${addr}: HTTP ${r.status}`);
