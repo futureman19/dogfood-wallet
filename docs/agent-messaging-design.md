@@ -1,9 +1,10 @@
 # Agent-to-Agent Messaging — v2 Design (Locus-native)
 
-**Status: S1–S6 IMPLEMENTED — S5 funded acceptance PASSED 2026-11-18
+**Status: S1–S7 IMPLEMENTED — S5 funded acceptance PASSED 2026-11-18
 (txid `e02893c9e4a7c169b113d243787eb7a30ee7adb24e8c23655d6ba491472b56da`,
 §6.4/§6.4a amendments, §12 S5); S6 live cross-agent loop PASSED 2026-11-20
-(mainnet grant `c1770b49…`, deployed door, §12 S6).** Implementation
+(mainnet grant `c1770b49…`, deployed door, §12 S6); S7 BRC-78 encrypted
+messages IMPLEMENTED 2026-11-20 (TDD, zero funds/broadcast, §12 S7).** Implementation
 progress is tracked per slice in §12; funded steps still require explicit
 authorization. This revises v1 (`964bd54`) after
 grounding in the actual Locus Protocol spec and reference implementation
@@ -795,6 +796,31 @@ authorization. Disposable vaults + intercepted network for all tests.
   auto-resent) and the healthz `crypto` field is the string `"ok"`, not
   `{ok}`. Evidence: 9 JSON files under the run's `evidence/`. Grant tx
   confirmed present on WhatsOnChain (mempool at run time).
+- **S7 — Encrypted messages (BRC-78, opt-in). ✅ DONE 2026-11-20 (TDD, zero funds/broadcast).**
+  Implements the §13.4 contract. `src/agent-message.ts`: optional `enc:"brc78"`
+  envelope marker + strict encrypted-body validation (exact base64, ≥103 bytes,
+  ≤ `MAX_BODY_BYTES`+512, version header `42421033`) + exported `assertValidBody`.
+  `src/agent-message-crypto.ts`: pure BRC-78 encrypt/parse/decrypt (no vault/
+  policy/network); inner plaintext is canonical JSON binding `{msgId, body,
+  expiryHeight?}`; BRC-78 sender field cross-checked against the AIP authorship
+  key. `src/agent-message-send.ts`: `encryptTo` (compressed pubkey whose P2PKH
+  address must equal `to`, else `ENCRYPT` before any network) + `expiryHeight`;
+  plaintext pre-validated, encrypted before signing, evidence stores CIPHERTEXT
+  only. `src/agent-message-inbox.ts`: keyless `encrypted:true` marking
+  (`enc===brc78`), never decrypts during scan. `src/agent-message-decrypt.ts`:
+  owner-gated, gate-before-decrypt — killfile checked before fetch AND again
+  immediately before key use; requires verified AIP authorship + recipient
+  addressability (`to`==vault); rejects replay (fail-closed `decrypted.json`
+  msgId dedupe store, `vault.ts`), expiry, tamper, and sender/authorship
+  mismatch; uses the vault's own key only, never broadcasts/spends. Surfaces:
+  CLI `message-decrypt <txid> [--height N] [--json]` + `agent-message
+  --encrypt-to/--expiry-height`; MCP gated `message_decrypt` + `agent_message`
+  `encryptTo`/`expiryHeight`. Registry pins (delegate-guard/http/onboarding) and
+  the package `files` allowlist updated. 53 new tests; full verify **1464/0**
+  (9,372 assertions), typecheck green. Intercepted/stubbed transport only —
+  zero broadcasts, no funding. Security ceiling unchanged: BRC-78 gives
+  confidentiality only (no forward secrecy / peer auth); the app binds
+  msgId+expiry and rejects reuse exactly-once; never used for secrets.
 
 Gate for every slice: `bun run verify` green (full tests + typecheck) before
 commit. This design doc is intentionally NOT added to `package.json` `files`
@@ -814,9 +840,9 @@ commit. This design doc is intentionally NOT added to `package.json` `files`
 3. **Coin-selection marking.** How inbox tips are marked/persisted so selection
    excludes them without breaking existing spend rails.
 4. **Encryption timing. RESOLVED 2026-11-20 (decision + zero-fund feasibility
-   spike).** **Plaintext v1 stays for the current public OSP-coordination use
-   case**; encryption is a deferred follow-up slice (S7), triggered only by a
-   concrete private-coordination need. Rationale: the typed bodies
+   spike); S7 IMPLEMENTED 2026-11-20 (§12 S7).** **Plaintext v1 stays the default
+   for the current public OSP-coordination use case**; encryption is an opt-in
+   S7 slice (`encryptTo`), now implemented for private-coordination needs. Rationale: the typed bodies
    (`osp.grant.request`/`receipt`) carry public coordination data — scope,
    doorGenesisTxid, doorOwnerAddress and sessionPubHex are all public on-chain;
    only the optional `reason` free-text is private-ish. Encrypting public data
@@ -844,7 +870,7 @@ commit. This design doc is intentionally NOT added to `package.json` `files`
    big-endian `42421033`; the spec hex example's byte order differs — parse the
    SDK's actual output), sender/recipient identity keys (33B each) + keyID (32B)
    embedded. Evidence: scratch `encryption-decision-20261120/brc78-spike.log`.
-   **S7 implementation contract (when triggered):** (a) inbox stays KEYLESS —
+   **S7 implementation contract (IMPLEMENTED 2026-11-20, §12 S7):** (a) inbox stays KEYLESS —
    verify the AIP/envelope signature, mark `encrypted:true`, never decrypt during
    scan; (b) decryption is a separate owner-gated CLI/MCP operation that loads the
    recipient vault key ONLY after policy accepts (gate-before-decrypt, mirroring

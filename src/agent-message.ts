@@ -29,6 +29,12 @@ export const MESSAGE_APP = "dogfood";
 export const MESSAGE_V = 1;
 export const MAX_BODY_BYTES = 4096;
 export const MAX_REASON_BYTES = 280;
+/** S7: the only supported envelope encryption algorithm marker. */
+export const MESSAGE_ENC_ALG = "brc78";
+/** BRC-78 version 0x42421033, serialized big-endian on the wire (§13.4 spike). */
+export const BRC78_VERSION_HEX = "42421033";
+/** Decoded-ciphertext cap: plaintext MAX_BODY_BYTES plus BRC-78 framing overhead. */
+export const MAX_ENCRYPTED_BODY_BYTES = MAX_BODY_BYTES + 512;
 
 // S5 live acceptance (2026-11-18): GorillaPool ARC rejects outputs below
 // 546 sats as dust (peer policy; cf. bitcoin-sv node issue #35). The inbox
@@ -49,9 +55,7 @@ export const MESSAGE_SUBTYPE = "agent-message";
 
 export type Envelope = Record<string, unknown>;
 
-const ENVELOPE_KEYS = new Set([
-  "app", "v", "type", "from", "to", "fromAgentPin", "toAgentPin", "nonce", "ts", "body", "sig",
-]);
+const ENVELOPE_KEYS = new Set(["app", "v", "type", "from", "to", "fromAgentPin", "toAgentPin", "nonce", "ts", "body", "sig", "enc"]);
 const TYPE_RE = /^[a-z][a-z0-9._-]{0,63}$/;
 const NONCE_RE = /^[0-9a-f]{32}$/;
 const HEX64_RE = /^[0-9a-f]{64}$/;
@@ -145,6 +149,22 @@ function validateBody(type: string, body: unknown): void {
   if (Buffer.byteLength(canon, "utf8") > MAX_BODY_BYTES) fail(`body exceeds ${MAX_BODY_BYTES} bytes`);
 }
 
+/** S7: a ciphertext body must be exact base64 decoding to a BRC-78-framed blob. */
+function validateEncryptedBody(body: unknown): void {
+  if (typeof body !== "string" || !B64_RE.test(body)) fail("encrypted body must be a base64 string");
+  let raw: Buffer;
+  try { raw = Buffer.from(body as string, "base64"); } catch { fail("encrypted body base64 decode failed"); }
+  if (raw.toString("base64") !== body) fail("encrypted body is not exact base64");
+  if (raw.length < 103) fail("encrypted body too short for BRC-78 framing");
+  if (raw.length > MAX_ENCRYPTED_BODY_BYTES) fail(`encrypted body exceeds ${MAX_ENCRYPTED_BODY_BYTES} bytes`);
+  if (raw.subarray(0, 4).toString("hex") !== BRC78_VERSION_HEX) fail("encrypted body is not a BRC-78 message");
+}
+
+/** S7: validate a decrypted inner plaintext body by type (filing parity hook). */
+export function assertValidBody(type: string, body: unknown): void {
+  validateBody(type, body);
+}
+
 function validateSigFormat(sig: unknown): Buffer {
   if (typeof sig !== "string" || !B64_RE.test(sig)) fail("sig must be base64");
   const raw = Buffer.from(sig, "base64");
@@ -176,7 +196,14 @@ function validateEnvelope(env: unknown, sigPolicy: SigPolicy): Envelope {
       if (!Number.isSafeInteger(vout) || vout > 0xffffffff) fail(`${k} vout out of range`);
     }
   }
-  validateBody(e.type as string, e.body);
+  if (e.enc !== undefined) {
+    // S7: encrypted envelope — body is a base64 BRC-78 ciphertext, NOT plaintext.
+    // The inner plaintext body is validated at decrypt time (filing parity).
+    if (e.enc !== MESSAGE_ENC_ALG) fail(`enc must be "${MESSAGE_ENC_ALG}" when present`);
+    validateEncryptedBody(e.body);
+  } else {
+    validateBody(e.type as string, e.body);
+  }
   if (e.sig !== undefined) {
     if (sigPolicy === "forbidden") fail("envelope must be unsigned here");
     validateSigFormat(e.sig);

@@ -44,6 +44,8 @@ export function vaultPaths(root: string) {
     messages: join(root, "messages"),
     /** S3 read-only inbox cache: high-water mark, dedupe set, entries. */
     inbox: join(root, "inbox.json"),
+    /** S7 replay guard: msgIds already decrypted by this vault (fail-closed). */
+    decrypted: join(root, "decrypted.json"),
   };
 }
 

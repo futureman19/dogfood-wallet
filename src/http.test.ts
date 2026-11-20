@@ -81,7 +81,7 @@ describe("listenHttp", () => {
         (listed.json as { result?: { tools?: Array<{ name: string }> } }).result?.tools?.map((t) => t.name) ??
         [];
       expect(names.sort()).toEqual(
-        ["address", "agent_message", "auth_sign", "auth_verify", "balance", "kill", "message_verify", "messages", "osp_doors", "request_allow", "request_cap", "request_osp_grant", "request_send", "requests", "send", "status", "x402_inspect", "x402_proof", "x402_delegate", "x402_pay"].sort(),
+        ["address", "agent_message", "auth_sign", "auth_verify", "balance", "kill", "message_decrypt", "message_verify", "messages", "osp_doors", "request_allow", "request_cap", "request_osp_grant", "request_send", "requests", "send", "status", "x402_inspect", "x402_proof", "x402_delegate", "x402_pay"].sort(),
       );
       expect(names).not.toContain("allow");
       expect(names).not.toContain("sweep");

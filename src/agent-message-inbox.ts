@@ -21,7 +21,7 @@ import { existsSync, openSync, fsyncSync, closeSync, writeFileSync, renameSync, 
 import { PublicKey, Transaction, Utils } from "@bsv/sdk";
 import {
   parseMessageScript, verifyMessageScript, parseLocusMessagePayload, strictMainnetAddress,
-  MESSAGE_SUBTYPE, MESSAGE_TIP_SATS, LOCUS_P, LOCUS_V, type Envelope,
+  MESSAGE_SUBTYPE, MESSAGE_TIP_SATS, MESSAGE_ENC_ALG, LOCUS_P, LOCUS_V, type Envelope,
 } from "./agent-message";
 import { sourceTransaction } from "./gryd-buy";
 import { vaultPaths } from "./vault";
@@ -48,6 +48,9 @@ export type InboxEntry = {
   bound: boolean; boundReason?: string;
   pinId?: string; tipPayee: string;
   untrusted: true;
+  /** S7: true when the envelope carries enc=brc78 (ciphertext body). The inbox
+   * marks this keylessly and NEVER decrypts; decryption is a separate gated op. */
+  encrypted?: boolean;
 };
 
 export type InboxStore = { v: 1; highWater: number; seen: Record<string, number>; entries: InboxEntry[] };
@@ -64,6 +67,7 @@ export type MessageVerifyResult = {
   pubkey?: string; tipPayee?: string; toMatchesTip?: boolean;
   bound?: boolean; boundReason?: string; pinId?: string;
   untrusted?: true;
+  encrypted?: boolean;
   confirmationChecked: false;
 };
 
@@ -252,7 +256,7 @@ export async function verifyMessageTx(txid: string, opts: { fetchFn?: FetchFn; s
     ts: isInt(e.ts) ? e.ts : undefined,
     pubkey: c.pubkey, tipPayee: c.tipPayee, toMatchesTip: c.toMatchesTip,
     bound: binding.bound, boundReason: binding.boundReason, pinId: c.pinId,
-    untrusted: true, confirmationChecked: false,
+    untrusted: true, encrypted: e.enc === MESSAGE_ENC_ALG, confirmationChecked: false,
   };
 }
 
@@ -270,6 +274,7 @@ function validateEntry(x: unknown): InboxEntry {
     fail("REJECTED: malformed inbox.json entry flags.");
   for (const k of ["fromAgentPin", "toAgentPin", "verifyError", "boundReason", "pinId"] as const)
     if (e[k] !== undefined && typeof e[k] !== "string") fail(`REJECTED: malformed inbox.json entry ${k}.`);
+  if (e.encrypted !== undefined && typeof e.encrypted !== "boolean") fail("REJECTED: malformed inbox.json entry encrypted.");
   return e as unknown as InboxEntry;
 }
 
@@ -424,6 +429,7 @@ export async function scanInbox(opts: {
       verified: c.verified, verifyError: c.verifyError,
       bound: binding.bound, boundReason: binding.boundReason,
       pinId: c.pinId, tipPayee: c.tipPayee!, untrusted: true,
+      encrypted: e.enc === MESSAGE_ENC_ALG,
     };
     store.entries.push(entry);
     byTxid.set(entry.txid, entry);

@@ -75,11 +75,13 @@ export function createServer(root: string) {
         to: z.string().describe("Recipient mainnet P2PKH address"),
         body: z.string().describe("Message body: UTF-8 text for type 'message'; JSON text of the typed object for osp.grant.* types (within policy.messages.maxBodyBytes)"),
         type: z.string().optional().describe("Message type: 'message' (default), 'osp.grant.request', 'osp.grant.receipt'. Unknown types reject BAD_TYPE."),
+        encryptTo: z.string().optional().describe("Compressed recipient pubkey hex (02/03 + 64 hex) whose P2PKH address equals `to`. When set, the body is BRC-78 encrypted (enc=brc78): ciphertext is public, plaintext stays private to the recipient. Mismatch rejects ENCRYPT before any network."),
+        expiryHeight: z.number().int().nonnegative().optional().describe("Optional chain height after which the encrypted message expires (bound into the ciphertext; requires encryptTo)."),
       },
     },
-    async ({ to, body, type }) => {
+    async ({ to, body, type, encryptTo, expiryHeight }) => {
       const { sendAgentMessage } = await import("./agent-message-send");
-      const result = await sendAgentMessage({ root, to, body, type });
+      const result = await sendAgentMessage({ root, to, body, type, encryptTo, expiryHeight });
       return text(result, !result.ok);
     },
   );
@@ -124,6 +126,23 @@ export function createServer(root: string) {
       } catch (e) {
         return text({ ok: false, error: e instanceof Error ? e.message : String(e) }, true);
       }
+    },
+  );
+
+  server.registerTool(
+    "message_decrypt",
+    {
+      description:
+        "Owner-gated decryption of ONE encrypted (enc=brc78) inbox message addressed to this vault. Gate-before-decrypt: the killfile is checked before any fetch and again immediately before the key is used. Requires a verified AIP authorship signature and recipient addressability (envelope.to == this vault). Rejects replay (msgId dedupe store), expiry, tamper, and BRC-78 sender/authorship mismatch; fail-closed. Uses this vault's own key only; never broadcasts, never spends. The decrypted body is UNTRUSTED peer data. BRC-78 gives confidentiality only (no forward secrecy, no peer authentication) — never used for secrets.",
+      inputSchema: {
+        txid: z.string().describe("64-hex transaction id of the encrypted message to decrypt"),
+        height: z.number().int().nonnegative().optional().describe("Current chain height for the inner expiryHeight check (optional)"),
+      },
+    },
+    async ({ txid, height }) => {
+      const { decryptInboxMessage } = await import("./agent-message-decrypt");
+      const result = await decryptInboxMessage({ root, txid, height });
+      return text(result, !result.ok);
     },
   );
 

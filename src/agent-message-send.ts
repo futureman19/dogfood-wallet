@@ -21,8 +21,9 @@
 // Transport is injectable for tests; defaults are the live WoC/ARC paths.
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { P2PKH, Script, Transaction } from "@bsv/sdk";
-import { buildMessageScript, randomNonce, signEnvelope, MESSAGE_TIP_SATS, DUST_LIMIT_SATS, type Envelope } from "./agent-message";
+import { P2PKH, PublicKey, Script, Transaction } from "@bsv/sdk";
+import { buildMessageScript, randomNonce, signEnvelope, MESSAGE_TIP_SATS, DUST_LIMIT_SATS, MESSAGE_ENC_ALG, assertValidBody, type Envelope } from "./agent-message";
+import { encryptMessageBody } from "./agent-message-crypto";
 import { gateAgentSend, loadPolicyEnvelope } from "./brc181";
 import { excludeInboxTips, loadInboxTips, markInboxTip } from "./inbox-tips";
 import { inspectPaymentHold, PaymentHeldError, withPaymentGuard } from "./payment-guard";
@@ -52,6 +53,12 @@ export type AgentMessageSendOptions = {
   ts?: number;
   /** Injectable clock (ms) for deterministic tests. */
   now?: () => number;
+  /** S7: encrypt the body for this recipient compressed pubkey (BRC-78). The
+   * pubkey MUST hash to `to` (addressability binding). When set, the envelope
+   * carries enc=brc78 and a ciphertext body; evidence stores ciphertext only. */
+  encryptTo?: string;
+  /** S7: optional block height after which the encrypted message expires. */
+  expiryHeight?: number;
   fetchUtxos?: (address: string) => Promise<Utxo[]>;
   fetchTxHex?: (txid: string) => Promise<string>;
   broadcast?: (rawTx: string) => Promise<{ txid: string }>;
@@ -123,6 +130,25 @@ export async function sendAgentMessage(opts: AgentMessageSendOptions): Promise<A
     );
     if (!decision.ok) return decision;
 
+    // S7: bind the encryption recipient to the addressed vault BEFORE any fetch.
+    // encryptTo must be a compressed pubkey whose P2PKH address equals `to`, so
+    // a ciphertext can only be opened by the vault the message is addressed to.
+    if (opts.encryptTo !== undefined) {
+      if (typeof opts.encryptTo !== "string" || !/^(02|03)[0-9a-f]{64}$/.test(opts.encryptTo)) {
+        return { ok: false, code: "ENCRYPT", message: "encryptTo must be a compressed recipient pubkey hex" };
+      }
+      let recipientPub: PublicKey;
+      try { recipientPub = PublicKey.fromString(opts.encryptTo); } catch {
+        return { ok: false, code: "ENCRYPT", message: "encryptTo is not a valid public key" };
+      }
+      if (recipientPub.toAddress() !== opts.to) {
+        return { ok: false, code: "ENCRYPT", message: "encryptTo pubkey does not hash to the recipient address" };
+      }
+      if (opts.expiryHeight !== undefined && (!Number.isSafeInteger(opts.expiryHeight) || opts.expiryHeight < 0)) {
+        return { ok: false, code: "ENCRYPT", message: "expiryHeight must be a non-negative safe integer" };
+      }
+    }
+
     // BRC-181 pre-gate: fail closed on a corrupt signed policy before any fetch.
     const loaded = loadPolicyEnvelope(vaultPaths(root).brc181);
     if (!loaded.ok) return loaded;
@@ -135,7 +161,22 @@ export async function sendAgentMessage(opts: AgentMessageSendOptions): Promise<A
     // network access. signEnvelope/buildMessageScript are deterministic.
     const nonce = opts.nonce ?? randomNonce();
     const ts = opts.ts ?? Math.floor(now() / 1000);
-    const unsigned = { v: 1, app: "dogfood", type, from: vault.address, to: opts.to, nonce, ts, body: envelopeBody };
+    const unsigned: Envelope = { v: 1, app: "dogfood", type, from: vault.address, to: opts.to, nonce, ts, body: envelopeBody };
+    // S7: encrypt the validated plaintext body for the addressed recipient. The
+    // plaintext is validated by type first (filing parity); the envelope then
+    // carries enc=brc78 + base64 ciphertext, and signEnvelope/buildMessageScript
+    // sign the CIPHERTEXT bytes (authorship of the encrypted blob).
+    if (opts.encryptTo !== undefined) {
+      try { assertValidBody(type, envelopeBody); } catch (error) {
+        return { ok: false, code: "BAD_BODY", message: error instanceof Error ? error.message : String(error) };
+      }
+      let enc;
+      try { enc = encryptMessageBody(vault.key, opts.encryptTo, envelopeBody, { expiryHeight: opts.expiryHeight }); } catch (error) {
+        return { ok: false, code: "ENCRYPT", message: error instanceof Error ? error.message : String(error) };
+      }
+      unsigned.enc = MESSAGE_ENC_ALG;
+      unsigned.body = enc.ciphertextB64;
+    }
     let signed: Envelope;
     let scriptHex: string;
     try {
