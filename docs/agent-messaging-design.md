@@ -667,9 +667,13 @@ raw-signing MCP tool. Grant signing stays off MCP entirely (unchanged).
   silently trusted. None of these proves off-chain identity or honesty.
 - **Public and permanent.** Every body is readable by anyone, forever. v1 is
   for coordination, not secrets. Never put keys, credentials, or private data
-  in a message. Encryption (BRC-2 ECIES to the recipient's pubkey, supported
-  by `@bsv/sdk`) is a clean follow-up slice, decrypted only after the
-  recipient's policy accepts (gate-before-decrypt, `8963a00`).
+  in a message. Encryption is a deferred follow-up slice targeting **BRC-78**
+  (Portable Encrypted Messages; the SDK's legacy Electrum `compat/ECIES` is
+  `@deprecated` in its favor), decrypted only after the recipient's policy
+  accepts (gate-before-decrypt, `8963a00`). BRC-78 is a non-authenticated key
+  exchange (no forward secrecy / replay / peer-auth), so it raises
+  confidentiality against passive on-chain readers but does NOT make messages
+  safe for secrets — the "no keys/credentials" rule still holds. See §13.4.
 - **No derivation proof.** `from` is a self-claimed vault address backed by
   key control; the agent-pin binding (§3.4) is the identity layer, not a
   derivation proof. BAP identity integration is a possible later layer.
@@ -809,9 +813,49 @@ commit. This design doc is intentionally NOT added to `package.json` `files`
    later policy option.
 3. **Coin-selection marking.** How inbox tips are marked/persisted so selection
    excludes them without breaking existing spend rails.
-4. **Encryption timing.** Plaintext v1 (recommended) vs BRC-2 ECIES from the
-   start. Encryption adds recipient-key handling and an MCP decryption surface;
-   defer unless a concrete private-coordination need appears.
+4. **Encryption timing. RESOLVED 2026-11-20 (decision + zero-fund feasibility
+   spike).** **Plaintext v1 stays for the current public OSP-coordination use
+   case**; encryption is a deferred follow-up slice (S7), triggered only by a
+   concrete private-coordination need. Rationale: the typed bodies
+   (`osp.grant.request`/`receipt`) carry public coordination data — scope,
+   doorGenesisTxid, doorOwnerAddress and sessionPubHex are all public on-chain;
+   only the optional `reason` free-text is private-ish. Encrypting public data
+   adds recipient-key handling + an MCP decryption attack surface for negligible
+   confidentiality gain.
+   **Standard CORRECTED:** the target is **BRC-78** (Portable Encrypted Messages:
+   BRC-2 process + BRC-42/43 derivation, AES-256-GCM), NOT the earlier "BRC-2
+   ECIES" wording — BRC-2 is the wallet encrypt/decrypt *method* (legacy BRC-1–7
+   framing, now exposed via BRC-100), and the SDK's `compat/ECIES`
+   (Electrum/Bitcore) is `@deprecated` in favor of BRC-78 and leaks message
+   equality via reused BIE1 key/IV. The installed `@bsv/sdk` exposes BRC-78
+   natively (`EncryptedMessage.encrypt/decrypt`; also BRC-100
+   `ProtoWallet.encrypt/decrypt`).
+   **Security ceiling (SDK security note, verified by spike):** BRC-78 is a
+   NON-authenticated key exchange — no forward secrecy, no replay protection, no
+   peer-identity authentication. It is for lightweight confidential coordination,
+   NOT secrets / high-value / long-lived data. The application must bind purpose
+   + a unique message identifier + expiry into the plaintext and reject reuse
+   exactly-once (the OSP typed contract already binds doorGenesisTxid/scopeHash/
+   grantTxid; encrypted bodies add a msgId + expiry).
+   **Feasibility PROVEN (12/12 checks, disposable random keys, zero network/funds):**
+   round-trip decrypt; wrong-recipient rejected; single-byte tamper rejected (GCM
+   auth); replay decrypts again (confirms no replay protection); fresh encrypt
+   uses random keyID/IV; BRC-78 serialization version `0x42421033` (SDK emits
+   big-endian `42421033`; the spec hex example's byte order differs — parse the
+   SDK's actual output), sender/recipient identity keys (33B each) + keyID (32B)
+   embedded. Evidence: scratch `encryption-decision-20261120/brc78-spike.log`.
+   **S7 implementation contract (when triggered):** (a) inbox stays KEYLESS —
+   verify the AIP/envelope signature, mark `encrypted:true`, never decrypt during
+   scan; (b) decryption is a separate owner-gated CLI/MCP operation that loads the
+   recipient vault key ONLY after policy accepts (gate-before-decrypt, mirroring
+   `osp.ts` `gateOsp`/`checkKill`, `8963a00`), rechecking killfile before key
+   access; (c) recipient identity = vault root pubkey (addressability, §13.7);
+   sender identity recovered from the BRC-78 sender field and cross-checked
+   against the AIP authorship key; (d) bind msgId+expiry, reject reuse via the
+   inbox dedupe store; (e) the ciphertext rides the same Option A BitCom script as
+   a base64 push (546-sat tip + fee model unchanged); (f) fail-closed —
+   undecryptable/unauthorized surfaces ciphertext, never plaintext; no raw-decrypt
+   MCP tool, decryption stays inside a gated operation.
 5. **JungleBus vs polling.** v1 polls; subscription needs a human dashboard step
    and a listener. Revisit when inbox latency matters.
 6. **Auto-filing grant requests.** Should verified `osp.grant.request` messages
